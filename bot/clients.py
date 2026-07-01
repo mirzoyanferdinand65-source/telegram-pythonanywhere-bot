@@ -88,6 +88,49 @@ class _LazyBotInfo:
 BOT_INFO = _LazyBotInfo()
 
 
+def register_commands() -> str:
+    """Register the bot's command list with Telegram (setMyCommands).
+
+    This is what makes Telegram show a menu of commands (with descriptions)
+    when the user types "/" in the chat, and populates the blue "Menu" button.
+    Idempotent — Telegram just overwrites the stored list. Never raises: a bad
+    token or network blip must not crash worker boot, so failures are caught
+    and returned as a status string for logging.
+
+    The /model command is only advertised when HF_SPACE_ID is set, matching
+    the handler in bot/handlers.py which is only registered in that case.
+    """
+    from telebot.types import BotCommand
+
+    from bot.config import HF_SPACE_ID
+
+    commands = [
+        BotCommand("start", "Say hello and get started"),
+        BotCommand("help", "Show help and all commands"),
+        BotCommand("reset", "Clear our conversation and start fresh"),
+        BotCommand("about", "What powers me"),
+        BotCommand("joke", "Hear a fresh joke"),
+        BotCommand("quote", "Get a motivational quote"),
+        BotCommand("fact", "Learn a surprising fact"),
+        BotCommand("compliment", "Get a kind word"),
+        BotCommand("roast", "Get a playful roast of a name"),
+        BotCommand("remember", "Save a note"),
+        BotCommand("recall", "Show all your saved notes"),
+        BotCommand("forget", "Delete all your saved notes"),
+    ]
+    if HF_SPACE_ID:
+        commands.append(BotCommand("model", "Switch the AI engine I run on"))
+
+    try:
+        result = bot.set_my_commands(commands)
+    except Exception as e:
+        return f"Command registration failed: {e}"
+
+    if result is False:
+        return "Command registration: Telegram returned False"
+    return f"Registered {len(commands)} bot commands (type / in chat to see them)"
+
+
 def register_webhook() -> str:
     """Register the Telegram webhook against WEBHOOK_URL.
 

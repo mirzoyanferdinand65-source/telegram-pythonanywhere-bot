@@ -74,7 +74,7 @@ make install
 Then copy the template and fill in the values you saved in Steps 1 and 2:
 
 ```bash
-cp .env.example .env
+cp .env .env
 ```
 
 Open `.env` in your editor and set these two lines:

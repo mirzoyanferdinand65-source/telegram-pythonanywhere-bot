@@ -7,3 +7,12 @@ __pycache__/
 .deploy.lock
 .webhook_secret
 .vercel/
+
+# Local SQLite database (created at runtime)
+bot.db
+*.db-wal
+*.db-shm
+
+# Editor / tooling
+.idea/
+.claude/

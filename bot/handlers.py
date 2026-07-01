@@ -12,6 +12,7 @@ from bot.config import (
 from bot.ai import ask_ai
 from bot.helpers import is_allowed, keep_typing, send_reply, should_respond
 from bot.history import clear_history
+from bot.notes import add_note, clear_notes, get_notes
 from bot.preferences import get_provider, set_provider
 from bot.providers import generate
 from bot.rate_limit import is_rate_limited
@@ -139,6 +140,10 @@ def cmd_help(message):
         "/quote — get a motivational quote",
         "/fact  — learn a surprising fact",
         "/compliment — get a kind word",
+        "/roast <name> — get a playful roast",
+        "/remember <note> — save a note (adds, never replaces)",
+        "/recall — show all your saved notes",
+        "/forget — delete all your saved notes",
     ]
     if HF_SPACE_ID:
         lines.append("/model — switch the AI engine I run on")
@@ -308,6 +313,91 @@ _COMPLIMENT_FALLBACK = "You show up and keep trying, and that quiet persistence 
 @bot.message_handler(commands=["compliment"], func=is_allowed)
 def cmd_compliment(message):
     _ai_oneshot(message, _COMPLIMENT_SYSTEM, "Give me a compliment.", _COMPLIMENT_FALLBACK)
+
+
+# /roast takes an argument: /roast <name>. It's a playful comedy-roast — harsh
+# and savage in tone, but guardrailed (no slurs, no hate, no attacks on real
+# protected traits) since this is a students' bot. Reuses _ai_oneshot with a
+# per-name user prompt.
+_ROAST_SYSTEM = (
+    "You are a savage but playful comedy-roast writer. Given a name, reply with "
+    "exactly one short, punchy, brutal roast of that name and nothing else — "
+    "one or two sentences, no preamble. Be witty and harsh like a stand-up "
+    "roast, but keep it PG-13: no slurs, no profanity, no hate, and never "
+    "attack real protected traits (race, religion, gender, disability, etc.). "
+    "Roast the vibe of the name itself. Make it different each time."
+)
+
+
+@bot.message_handler(commands=["roast"], func=is_allowed)
+def cmd_roast(message):
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
+        bot.send_message(
+            message.chat.id, "Usage: /roast <name>\nExample: /roast Kevin"
+        )
+        return
+    name = parts[1].strip()
+    fallback = f"{name}? I'd roast you, but my circuits fell asleep halfway through. 😴"
+    _ai_oneshot(message, _ROAST_SYSTEM, f"Roast this name: {name}", fallback)
+
+
+@bot.message_handler(commands=["remember"], func=is_allowed)
+def cmd_remember(message):
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
+        bot.send_message(
+            message.chat.id,
+            "Usage: /remember <note>\nExample: /remember buy milk tomorrow",
+        )
+        return
+    note = parts[1].strip()
+    # add_note APPENDS to the user's existing notes — it never replaces them.
+    if add_note(message.from_user.id, note):
+        count = len(get_notes(message.from_user.id))
+        bot.send_message(message.chat.id, f"Got it — saved. You now have {count} note(s).")
+    else:
+        # Storage unconfigured (stateless mode) or a write error.
+        bot.send_message(
+            message.chat.id,
+            "I can't save notes right now — memory isn't set up on this bot.",
+        )
+
+
+@bot.message_handler(commands=["recall"], func=is_allowed)
+def cmd_recall(message):
+    if store is None:
+        bot.send_message(
+            message.chat.id,
+            "I can't recall notes right now — memory isn't set up on this bot.",
+        )
+        return
+    notes = get_notes(message.from_user.id)
+    if not notes:
+        bot.send_message(
+            message.chat.id,
+            "You don't have any saved notes yet. Add one with /remember <note>.",
+        )
+        return
+    lines = ["Your notes:"] + [f"{i}. {note}" for i, note in enumerate(notes, 1)]
+    # send_reply handles Telegram's 4096-char limit if the list is long.
+    send_reply(message, "\n".join(lines))
+
+
+@bot.message_handler(commands=["forget"], func=is_allowed)
+def cmd_forget(message):
+    if store is None:
+        bot.send_message(
+            message.chat.id,
+            "There's nothing to forget — memory isn't set up on this bot.",
+        )
+        return
+    had = len(get_notes(message.from_user.id))
+    if not had:
+        bot.send_message(message.chat.id, "You have no saved notes to forget.")
+        return
+    clear_notes(message.from_user.id)
+    bot.send_message(message.chat.id, f"Done — deleted all {had} of your notes.")
 
 
 @bot.message_handler(content_types=["text"], func=is_allowed)

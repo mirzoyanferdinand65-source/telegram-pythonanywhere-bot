@@ -20,7 +20,7 @@ Requirements:
         TELEGRAM_BOT_TOKEN=123456:ABC...
         AI_API_KEY=csk-...
 
-    See .env.example for the full list of optional variables
+    See .env for the full list of optional variables
     (SQLITE_PATH, WEBHOOK_SECRET, HF_SPACE_ID, etc.).
 """
 
@@ -38,7 +38,7 @@ def load_dotenv(path: str = ".env") -> None:
     """
     env_file = Path(path)
     if not env_file.exists():
-        print(f"No {path} file found. Create one from .env.example first.")
+        print(f"No {path} file found. Create one from .env first.")
         return
     for raw in env_file.read_text().splitlines():
         line = raw.strip()
@@ -77,19 +77,24 @@ def preflight() -> None:
     for key in missing:
         print(f"  - {key}  ({required[key]})")
     print()
-    print("Add them to your .env file (see .env.example for the full list).")
-    print("If you don't have a .env yet, run: cp .env.example .env")
+    print("Add them to your .env file (see .env for the full list).")
+    print("If you don't have a .env yet, run: cp .env .env")
     raise SystemExit(1)
 
 
 preflight()
 
 import bot.handlers  # noqa: F401  — registers all @bot.message_handler decorators
-from bot.clients import bot, BOT_INFO
+from bot.clients import bot, BOT_INFO, register_commands
 
 
 def main() -> None:
     print(f"Bot @{BOT_INFO.username} starting in polling mode.\n")
+
+    # Register the "/" command menu with Telegram so typing "/" in the chat
+    # shows the command list (/help, /joke, ...). Global to the bot token,
+    # so it applies to production too.
+    print(register_commands())
 
     # Telegram only allows ONE delivery method at a time (webhook OR
     # polling, not both). If a production webhook is registered,

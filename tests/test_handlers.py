@@ -124,6 +124,7 @@ def test_cmd_about_with_sqlite():
         patch("bot.handlers.bot") as mock_bot,
         patch("bot.handlers.store", MagicMock()),
         patch("bot.handlers.HF_SPACE_ID", ""),
+        patch("bot.handlers.generate", return_value="Hi! I'm your coach."),
     ):
         from bot.handlers import cmd_about
 
@@ -142,6 +143,7 @@ def test_cmd_about_includes_commit_sha_when_set():
         patch("bot.handlers.store", MagicMock()),
         patch("bot.handlers.HF_SPACE_ID", ""),
         patch("bot.handlers.COMMIT_SHA", "abc1234"),
+        patch("bot.handlers.generate", return_value="Hi! I'm your coach."),
     ):
         from bot.handlers import cmd_about
 
@@ -158,6 +160,7 @@ def test_cmd_about_omits_version_line_when_sha_unknown():
         patch("bot.handlers.store", MagicMock()),
         patch("bot.handlers.HF_SPACE_ID", ""),
         patch("bot.handlers.COMMIT_SHA", ""),
+        patch("bot.handlers.generate", return_value="Hi! I'm your coach."),
     ):
         from bot.handlers import cmd_about
 
@@ -174,12 +177,114 @@ def test_cmd_about_without_store():
         patch("bot.handlers.bot") as mock_bot,
         patch("bot.handlers.store", None),
         patch("bot.handlers.HF_SPACE_ID", ""),
+        patch("bot.handlers.generate", return_value="Hi! I'm your coach."),
     ):
         from bot.handlers import cmd_about
 
         cmd_about(make_message())
         sent = mock_bot.send_message.call_args[0][1]
         assert "stateless" in sent
+
+
+def test_cmd_about_intro_is_generated_live():
+    """The persona intro is produced by a live generate() call (built from
+    SYSTEM_PROMPT, not the user's saved history) and rendered into /about."""
+    with (
+        patch("bot.handlers.bot") as mock_bot,
+        patch("bot.handlers.store", MagicMock()),
+        patch("bot.handlers.HF_SPACE_ID", ""),
+        patch(
+            "bot.handlers.generate", return_value="I am a word-loving coach."
+        ) as mock_gen,
+    ):
+        from bot.handlers import cmd_about, _ABOUT_PROMPT
+
+        cmd_about(make_message())
+
+        mock_gen.assert_called_once()
+        user_id, messages = mock_gen.call_args[0]
+        assert user_id == 123
+        assert messages[0]["role"] == "system"
+        assert messages[-1] == {"role": "user", "content": _ABOUT_PROMPT}
+        sent = mock_bot.send_message.call_args[0][1]
+        assert "I am a word-loving coach." in sent
+
+
+def test_cmd_about_falls_back_when_generate_fails():
+    """If the live AI call raises, /about still renders the static fallback
+    intro and the technical block — it never breaks as a health probe."""
+    with (
+        patch("bot.handlers.bot") as mock_bot,
+        patch("bot.handlers.store", MagicMock()),
+        patch("bot.handlers.HF_SPACE_ID", ""),
+        patch("bot.handlers.generate", side_effect=Exception("provider down")),
+    ):
+        from bot.handlers import cmd_about, _ABOUT_FALLBACK
+
+        cmd_about(make_message())
+        sent = mock_bot.send_message.call_args[0][1]
+        assert _ABOUT_FALLBACK in sent
+        assert "SQLite" in sent
+
+
+# ── /help ───────────────────────────────────────────────────────────────────--
+
+
+def test_cmd_help_blurb_is_generated_live():
+    """The /help blurb is produced by a live generate() call built from
+    SYSTEM_PROMPT (not the user's history), and the static command list is
+    still rendered below it."""
+    with (
+        patch("bot.handlers.bot") as mock_bot,
+        patch("bot.handlers.HF_SPACE_ID", ""),
+        patch(
+            "bot.handlers.generate", return_value="I help you master English words."
+        ) as mock_gen,
+    ):
+        from bot.handlers import cmd_help, _HELP_PROMPT
+
+        cmd_help(make_message())
+
+        mock_gen.assert_called_once()
+        user_id, messages = mock_gen.call_args[0]
+        assert user_id == 123
+        assert messages[0]["role"] == "system"
+        assert messages[-1] == {"role": "user", "content": _HELP_PROMPT}
+        sent = mock_bot.send_message.call_args[0][1]
+        assert "I help you master English words." in sent
+        # Command list is code-rendered, not left to the model.
+        assert "/reset" in sent
+        assert "/about" in sent
+
+
+def test_cmd_help_falls_back_when_generate_fails():
+    """If the live AI call raises, /help still shows the static fallback blurb
+    and the command list."""
+    with (
+        patch("bot.handlers.bot") as mock_bot,
+        patch("bot.handlers.HF_SPACE_ID", ""),
+        patch("bot.handlers.generate", side_effect=Exception("provider down")),
+    ):
+        from bot.handlers import cmd_help, _HELP_FALLBACK
+
+        cmd_help(make_message())
+        sent = mock_bot.send_message.call_args[0][1]
+        assert _HELP_FALLBACK in sent
+        assert "/start" in sent
+
+
+def test_cmd_help_includes_model_command_when_hf_set():
+    """The /model line appears only when an HF space is configured."""
+    with (
+        patch("bot.handlers.bot") as mock_bot,
+        patch("bot.handlers.HF_SPACE_ID", "owner/space"),
+        patch("bot.handlers.generate", return_value="blurb"),
+    ):
+        from bot.handlers import cmd_help
+
+        cmd_help(make_message())
+        sent = mock_bot.send_message.call_args[0][1]
+        assert "/model" in sent
 
 
 # ── /model command ────────────────────────────────────────────────────────────

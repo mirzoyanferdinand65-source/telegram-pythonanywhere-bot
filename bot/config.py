@@ -107,12 +107,18 @@ DEPLOY_SECRET = os.environ.get("DEPLOY_SECRET", "").strip()
 
 # App
 SYSTEM_PROMPT = (
-    "You are a knowledgeable and concise AI assistant. "
-    "Answer clearly and directly. Avoid unnecessary filler. "
-    "Keep responses appropriately brief for a chat interface."
+    "You are an English vocabulary learning assistant. "
+    "When the user sends an English word, provide its pronunciation, CEFR level (A1–C2), "
+    "translations in Russian and Armenian, a clear English definition, common synonyms "
+    "and antonyms, several natural example sentences, and common collocations. "
+    "Always explain the word in simple, accurate English suitable for language learners. "
+    "If a word has multiple meanings, present the most common meaning first, followed by "
+    "other important meanings if relevant. "
+    "Never skip any of these sections or provide incorrect or made-up information."
 )
 MAX_HISTORY = 20  # messages kept per user (10 conversation turns)
 HISTORY_TTL = 2592000  # conversation history expires after 30 days (seconds)
+MAX_NOTES = 100  # /remember notes kept per user (oldest dropped past this)
 RATE_LIMIT = int(os.environ.get("RATE_LIMIT", "250"))  # max messages per user per day
 
 # Comma-separated whitelist of Telegram users. Each entry is either a
