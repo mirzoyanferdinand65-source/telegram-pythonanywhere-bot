@@ -1,12 +1,68 @@
 import os
 from datetime import datetime
 from bot.clients import bot, BOT_INFO, store
-from bot.config import COMMIT_SHA, HF_SPACE_ID, HOSTING_LABEL, MODEL, RATE_LIMIT
+from bot.config import (
+    COMMIT_SHA,
+    HF_SPACE_ID,
+    HOSTING_LABEL,
+    MODEL,
+    RATE_LIMIT,
+    SYSTEM_PROMPT,
+)
 from bot.ai import ask_ai
 from bot.helpers import is_allowed, keep_typing, send_reply, should_respond
 from bot.history import clear_history
 from bot.preferences import get_provider, set_provider
+from bot.providers import generate
 from bot.rate_limit import is_rate_limited
+
+# One-off instruction used by /about to have the bot introduce itself in
+# its own (SYSTEM_PROMPT-defined) voice. Generated live, not from history,
+# so it always reflects the current persona and never pollutes the user's
+# learning conversation.
+_ABOUT_PROMPT = (
+    "Introduce yourself to a new user in 3-4 short, warm lines: who you are "
+    "and how you can help them. Do not analyze or define any word here — this "
+    "is just a friendly introduction."
+)
+# Shown if the live AI call fails (timeout, provider error, etc.) so /about
+# never breaks as a version/health probe.
+_ABOUT_FALLBACK = "Hi! I'm your English vocabulary coach. 📖 Send me any English word and I'll help you learn it."
+
+# One-off instruction used by /help to have the bot describe what it does in
+# its own (SYSTEM_PROMPT-defined) voice. The command list below is rendered
+# from code — only this descriptive blurb is generated live.
+_HELP_PROMPT = (
+    "In a few short lines and in your own voice, tell a new user what you can "
+    "do for them and how to use you. Do not analyze or define any word here — "
+    "this is a description of your help, not an example."
+)
+# Shown if the live AI call fails so /help always lists the commands.
+_HELP_FALLBACK = (
+    "I'm your English vocabulary coach. 📖 Send me any English word and I'll "
+    "give you its pronunciation, CEFR level, Russian and Armenian translations, "
+    "a clear definition, synonyms, antonyms, examples, and collocations."
+)
+
+
+def _persona_blurb(chat_id: int, user_id: int, prompt: str, fallback: str) -> str:
+    """Generate a short persona description live, in the current SYSTEM_PROMPT
+    voice. Built as a one-off message list (not via ask_ai) so it never lands
+    in the user's saved history, shows a typing indicator while generating, and
+    falls back to static text on any failure so the calling command never breaks."""
+    try:
+        with keep_typing(chat_id):
+            text = generate(
+                user_id,
+                [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+        return (text or "").strip() or fallback
+    except Exception as e:
+        print(f"Error generating persona blurb: {e}")
+        return fallback
 
 # Verbose console logging for local dev and teaching. Enabled by
 # BOT_VERBOSE_LOG=1 (run_local.py sets this automatically). Prints one
@@ -47,22 +103,45 @@ def _log(message, direction: str, text: str) -> None:
 
 @bot.message_handler(commands=["start"], func=is_allowed)
 def cmd_start(message):
-    bot.send_message(
-        message.chat.id,
-        "Hello! I'm your AI assistant. Send me a message to get started.\n\nUse /help to see available commands.",
+    text = (
+        "👋 Welcome! I'm your English vocabulary coach.\n"
+        "\n"
+        "Here's how to use me: just send me any English word, and I'll explain it for you — "
+        "its pronunciation, CEFR level (A1–C2), translations in Russian and Armenian, "
+        "a clear definition, synonyms and antonyms, example sentences, and common collocations.\n"
+        "\n"
+        "Try it now — send me a word like:\n"
+        "    resilient\n"
+        "\n"
+        "Type /help any time to see what I can do."
     )
+    bot.send_message(message.chat.id, text)
+
 
 
 @bot.message_handler(commands=["help"], func=is_allowed)
 def cmd_help(message):
+    # Persona blurb is generated live so it always reflects the current
+    # SYSTEM_PROMPT voice; the command list below is rendered from code
+    # because it's factual (the real commands), not persona text.
+    blurb = _persona_blurb(
+        message.chat.id, message.from_user.id, _HELP_PROMPT, _HELP_FALLBACK
+    )
     lines = [
-        "/start — welcome message",
+        blurb,
+        "",
+        "Commands:",
+        "/start — say hello and get started",
         "/help  — show this message",
-        "/reset — clear conversation history",
-        "/about — about this bot",
+        "/reset — clear our conversation and start fresh",
+        "/about — what powers me",
+        "/joke  — hear a fresh joke",
+        "/quote — get a motivational quote",
+        "/fact  — learn a surprising fact",
+        "/compliment — get a kind word",
     ]
     if HF_SPACE_ID:
-        lines.append("/model — switch AI provider")
+        lines.append("/model — switch the AI engine I run on")
     bot.send_message(message.chat.id, "\n".join(lines))
 
 
@@ -80,7 +159,17 @@ def cmd_about(message):
     else:
         model_line = MODEL
     storage_line = "SQLite" if store is not None else "stateless (no memory)"
+
+    # Persona intro is generated live so it always speaks in the current
+    # SYSTEM_PROMPT voice; the technical block below stays code-rendered.
+    intro = _persona_blurb(
+        message.chat.id, message.from_user.id, _ABOUT_PROMPT, _ABOUT_FALLBACK
+    )
+
     lines = [
+        intro,
+        "",
+        "— Under the hood —",
         f"Model  : {model_line}",
         f"Storage: {storage_line}",
         f"Hosting: {HOSTING_LABEL}",
@@ -128,6 +217,99 @@ if HF_SPACE_ID:
             bot.send_message(message.chat.id, "Switched to Main Provider.")
 
 
+# --- Fun one-shot AI commands (/joke, /quote, /fact, /compliment) ---
+#
+# These are all "one-shot" commands: a single AI generation with no memory.
+# They are intentionally DECOUPLED from the bot's vocabulary-coach persona —
+# each carries its own neutral system prompt (NOT SYSTEM_PROMPT) and calls
+# generate() directly with a one-off message list, so their output never
+# touches the user's learning history and isn't steered toward word/dictionary
+# themes. Variety across repeated calls comes from the provider's own sampling.
+
+
+def _ai_oneshot(message, system_prompt: str, user_prompt: str, fallback: str) -> None:
+    """Run a single stateless AI generation and send the reply.
+
+    Shared body for /joke, /quote, /fact, /compliment. Handles the daily rate
+    limit, shows the typing indicator, and falls back to a static string on any
+    error or empty response so the command never breaks.
+    """
+    if is_rate_limited(message.from_user.id):
+        bot.send_message(
+            message.chat.id,
+            f"You've reached the daily limit of {RATE_LIMIT} messages. Try again tomorrow.",
+        )
+        return
+    try:
+        with keep_typing(message.chat.id):
+            reply = generate(
+                message.from_user.id,
+                [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
+        reply = (reply or "").strip() or fallback
+    except Exception as e:
+        print(f"Error in _ai_oneshot ({user_prompt!r}): {e}")
+        reply = fallback
+    bot.send_message(message.chat.id, reply)
+
+
+_JOKE_SYSTEM = (
+    "You are a witty, family-friendly stand-up comedian. Reply with exactly "
+    "one short, clean, original joke and nothing else — no preamble, no emoji "
+    "unless it's part of the punchline. Pick any topic you like and surprise "
+    "the user with something different each time."
+)
+_JOKE_FALLBACK = "I'd tell you a joke about the internet, but it might not load. 😄"
+
+
+@bot.message_handler(commands=["joke"], func=is_allowed)
+def cmd_joke(message):
+    _ai_oneshot(message, _JOKE_SYSTEM, "Tell me a joke.", _JOKE_FALLBACK)
+
+
+_QUOTE_SYSTEM = (
+    "You are a concise motivational writer. Reply with exactly one original, "
+    "uplifting one-line quote and nothing else — no author, no quotation "
+    "marks, no preamble. Make it fresh and different each time."
+)
+_QUOTE_FALLBACK = "Small steps every day still carry you further than standing still. ✨"
+
+
+@bot.message_handler(commands=["quote"], func=is_allowed)
+def cmd_quote(message):
+    _ai_oneshot(message, _QUOTE_SYSTEM, "Give me a motivational quote.", _QUOTE_FALLBACK)
+
+
+_FACT_SYSTEM = (
+    "You are a knowledgeable trivia host. Reply with exactly one surprising, "
+    "true, little-known fact and nothing else — one or two sentences, no "
+    "preamble, no 'Did you know'. Pick any topic and make it different each time."
+)
+_FACT_FALLBACK = "Honey never spoils — archaeologists have found 3,000-year-old honey still edible. 🍯"
+
+
+@bot.message_handler(commands=["fact"], func=is_allowed)
+def cmd_fact(message):
+    _ai_oneshot(message, _FACT_SYSTEM, "Tell me a surprising fact.", _FACT_FALLBACK)
+
+
+_COMPLIMENT_SYSTEM = (
+    "You are warm and encouraging. Reply with exactly one short, genuine, "
+    "uplifting compliment addressed directly to the user ('you') and nothing "
+    "else — no preamble, no name. Keep it kind and sincere, and make it "
+    "different each time."
+)
+_COMPLIMENT_FALLBACK = "You show up and keep trying, and that quiet persistence is something special. 🌟"
+
+
+@bot.message_handler(commands=["compliment"], func=is_allowed)
+def cmd_compliment(message):
+    _ai_oneshot(message, _COMPLIMENT_SYSTEM, "Give me a compliment.", _COMPLIMENT_FALLBACK)
+
+
 @bot.message_handler(content_types=["text"], func=is_allowed)
 def handle_message(message):
     if not should_respond(message):
@@ -152,3 +334,4 @@ def handle_message(message):
         print(f"Error in handle_message: {e}")
         bot.send_message(message.chat.id, "Something went wrong. Please try again.")
         _log(message, "out", f"[error] {e}")
+
