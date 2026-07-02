@@ -28,7 +28,7 @@ _ABOUT_PROMPT = (
 )
 # Shown if the live AI call fails (timeout, provider error, etc.) so /about
 # never breaks as a version/health probe.
-_ABOUT_FALLBACK = "Hi! I'm your English vocabulary coach. 📖 Send me any English word and I'll help you learn it."
+_ABOUT_FALLBACK = "Ay, I'm the Don around here. You got a problem, you bring it to me — no job too big, no job too small. Fuhgeddaboutit."
 
 # One-off instruction used by /help to have the bot describe what it does in
 # its own (SYSTEM_PROMPT-defined) voice. The command list below is rendered
@@ -40,9 +40,8 @@ _HELP_PROMPT = (
 )
 # Shown if the live AI call fails so /help always lists the commands.
 _HELP_FALLBACK = (
-    "I'm your English vocabulary coach. 📖 Send me any English word and I'll "
-    "give you its pronunciation, CEFR level, Russian and Armenian translations, "
-    "a clear definition, synonyms, antonyms, examples, and collocations."
+    "I'm the Don around here. You got questions, you got problems — bring 'em "
+    "to me and I'll take care of it, like family. Capisce?"
 )
 
 
@@ -105,16 +104,14 @@ def _log(message, direction: str, text: str) -> None:
 @bot.message_handler(commands=["start"], func=is_allowed)
 def cmd_start(message):
     text = (
-        "👋 Welcome! I'm your English vocabulary coach.\n"
+        "🎩 Ay, welcome, welcome. Come in, sit down.\n"
         "\n"
-        "Here's how to use me: just send me any English word, and I'll explain it for you — "
-        "its pronunciation, CEFR level (A1–C2), translations in Russian and Armenian, "
-        "a clear definition, synonyms and antonyms, example sentences, and common collocations.\n"
+        "You can call me the Don. You got a question, somethin' you need figured "
+        "out — you bring it to me, like family, and I'll take care of it, capisce?\n"
         "\n"
-        "Try it now — send me a word like:\n"
-        "    resilient\n"
+        "Go on, ask me anything.\n"
         "\n"
-        "Type /help any time to see what I can do."
+        "Type /help if you need the lay of the land."
     )
     bot.send_message(message.chat.id, text)
 
@@ -131,29 +128,29 @@ def cmd_help(message):
     lines = [
         blurb,
         "",
-        "Commands:",
-        "/start — say hello and get started",
-        "/help  — show this message",
-        "/reset — clear our conversation and start fresh",
-        "/about — what powers me",
-        "/joke  — hear a fresh joke",
-        "/quote — get a motivational quote",
-        "/fact  — learn a surprising fact",
-        "/compliment — get a kind word",
-        "/roast <name> — get a playful roast",
-        "/remember <note> — save a note (adds, never replaces)",
-        "/recall — show all your saved notes",
-        "/forget — delete all your saved notes",
+        "Here's how we do business:",
+        "/start — pay your respects to the Don",
+        "/help  — this here list",
+        "/reset — clean slate, we start fresh",
+        "/about — who's runnin' this operation",
+        "/joke  — hear a good one",
+        "/quote — a little wisdom from the Don",
+        "/fact  — somethin' you didn't know",
+        "/compliment — get some respect",
+        "/roast <name> — we settle a score, playful-like",
+        "/remember <note> — I'll keep that safe, between us",
+        "/recall — see what I got on the books",
+        "/forget — clean the books",
     ]
     if HF_SPACE_ID:
-        lines.append("/model — switch the AI engine I run on")
+        lines.append("/model — switch who's runnin' the show")
     bot.send_message(message.chat.id, "\n".join(lines))
 
 
 @bot.message_handler(commands=["reset"], func=is_allowed)
 def cmd_reset(message):
     clear_history(message.from_user.id)
-    bot.send_message(message.chat.id, "Conversation cleared. Starting fresh!")
+    bot.send_message(message.chat.id, "The slate's clean, kid. We start fresh.")
 
 
 @bot.message_handler(commands=["about"], func=is_allowed)
@@ -174,7 +171,7 @@ def cmd_about(message):
     lines = [
         intro,
         "",
-        "— Under the hood —",
+        "— How the operation runs —",
         f"Model  : {model_line}",
         f"Storage: {storage_line}",
         f"Hosting: {HOSTING_LABEL}",
@@ -225,7 +222,7 @@ if HF_SPACE_ID:
 # --- Fun one-shot AI commands (/joke, /quote, /fact, /compliment) ---
 #
 # These are all "one-shot" commands: a single AI generation with no memory.
-# They are intentionally DECOUPLED from the bot's vocabulary-coach persona —
+# They are intentionally DECOUPLED from the bot's main SYSTEM_PROMPT persona —
 # each carries its own neutral system prompt (NOT SYSTEM_PROMPT) and calls
 # generate() directly with a one-off message list, so their output never
 # touches the user's learning history and isn't steered toward word/dictionary
@@ -242,7 +239,7 @@ def _ai_oneshot(message, system_prompt: str, user_prompt: str, fallback: str) ->
     if is_rate_limited(message.from_user.id):
         bot.send_message(
             message.chat.id,
-            f"You've reached the daily limit of {RATE_LIMIT} messages. Try again tomorrow.",
+            f"You've used up your {RATE_LIMIT} favors for today. Come back tomorrow, capisce?",
         )
         return
     try:
@@ -262,12 +259,12 @@ def _ai_oneshot(message, system_prompt: str, user_prompt: str, fallback: str) ->
 
 
 _JOKE_SYSTEM = (
-    "You are a witty, family-friendly stand-up comedian. Reply with exactly "
-    "one short, clean, original joke and nothing else — no preamble, no emoji "
-    "unless it's part of the punchline. Pick any topic you like and surprise "
-    "the user with something different each time."
+    "You are a witty mafia don telling a joke to your crew. Reply with exactly "
+    "one short, clean, original joke and nothing else — no preamble. A little "
+    "gangster-movie flavor ('kid', 'capisce') is welcome but don't overdo it. "
+    "Pick any topic and surprise them with something different each time."
 )
-_JOKE_FALLBACK = "I'd tell you a joke about the internet, but it might not load. 😄"
+_JOKE_FALLBACK = "I got a million of 'em, but my joke guy stepped out. Ask me again in a minute, capisce?"
 
 
 @bot.message_handler(commands=["joke"], func=is_allowed)
@@ -276,11 +273,12 @@ def cmd_joke(message):
 
 
 _QUOTE_SYSTEM = (
-    "You are a concise motivational writer. Reply with exactly one original, "
-    "uplifting one-line quote and nothing else — no author, no quotation "
-    "marks, no preamble. Make it fresh and different each time."
+    "You are a mafia don sharing hard-won wisdom with the family. Reply with "
+    "exactly one original, motivational one-line quote in gangster-movie "
+    "flavor, and nothing else — no author, no quotation marks, no preamble. "
+    "Make it fresh and different each time."
 )
-_QUOTE_FALLBACK = "Small steps every day still carry you further than standing still. ✨"
+_QUOTE_FALLBACK = "Respect is earned one day at a time, kid — nobody just hands it to you."
 
 
 @bot.message_handler(commands=["quote"], func=is_allowed)
@@ -289,11 +287,12 @@ def cmd_quote(message):
 
 
 _FACT_SYSTEM = (
-    "You are a knowledgeable trivia host. Reply with exactly one surprising, "
-    "true, little-known fact and nothing else — one or two sentences, no "
-    "preamble, no 'Did you know'. Pick any topic and make it different each time."
+    "You are a mafia don who knows a little about everything, letting someone "
+    "in on a secret. Reply with exactly one surprising, true, little-known "
+    "fact and nothing else — one or two sentences, no preamble, no "
+    "'Did you know'. Pick any topic and make it different each time."
 )
-_FACT_FALLBACK = "Honey never spoils — archaeologists have found 3,000-year-old honey still edible. 🍯"
+_FACT_FALLBACK = "Here's somethin' for ya — honey never spoils. Found 3,000-year-old honey in a tomb, still good to eat."
 
 
 @bot.message_handler(commands=["fact"], func=is_allowed)
@@ -302,12 +301,13 @@ def cmd_fact(message):
 
 
 _COMPLIMENT_SYSTEM = (
-    "You are warm and encouraging. Reply with exactly one short, genuine, "
-    "uplifting compliment addressed directly to the user ('you') and nothing "
-    "else — no preamble, no name. Keep it kind and sincere, and make it "
-    "different each time."
+    "You are a mafia don who's decided to show someone respect. Reply with "
+    "exactly one short, genuine, uplifting compliment addressed directly to "
+    "the user ('you'), delivered warmly in gangster-movie flavor, and nothing "
+    "else — no preamble, no name. Keep it sincere, and make it different "
+    "each time."
 )
-_COMPLIMENT_FALLBACK = "You show up and keep trying, and that quiet persistence is something special. 🌟"
+_COMPLIMENT_FALLBACK = "You got heart, kid. That's rare these days — don't lose it."
 
 
 @bot.message_handler(commands=["compliment"], func=is_allowed)
@@ -320,12 +320,14 @@ def cmd_compliment(message):
 # protected traits) since this is a students' bot. Reuses _ai_oneshot with a
 # per-name user prompt.
 _ROAST_SYSTEM = (
-    "You are a savage but playful comedy-roast writer. Given a name, reply with "
-    "exactly one short, punchy, brutal roast of that name and nothing else — "
-    "one or two sentences, no preamble. Be witty and harsh like a stand-up "
-    "roast, but keep it PG-13: no slurs, no profanity, no hate, and never "
-    "attack real protected traits (race, religion, gender, disability, etc.). "
-    "Roast the vibe of the name itself. Make it different each time."
+    "You are a mafia don giving a playful, theatrical roast — like ribbing "
+    "someone at the family table, not actually threatening them. Given a "
+    "name, reply with exactly one short, punchy, savage-but-affectionate "
+    "roast of that name in gangster-movie flavor, and nothing else — one or "
+    "two sentences, no preamble. Keep it PG-13: no slurs, no profanity, no "
+    "hate, and never attack real protected traits (race, religion, gender, "
+    "disability, etc.). Roast the vibe of the name itself. Make it different "
+    "each time."
 )
 
 
@@ -338,7 +340,7 @@ def cmd_roast(message):
         )
         return
     name = parts[1].strip()
-    fallback = f"{name}? I'd roast you, but my circuits fell asleep halfway through. 😴"
+    fallback = f"{name}? I'd roast ya, but even my guys need a coffee break. Ask me again."
     _ai_oneshot(message, _ROAST_SYSTEM, f"Roast this name: {name}", fallback)
 
 
@@ -355,12 +357,12 @@ def cmd_remember(message):
     # add_note APPENDS to the user's existing notes — it never replaces them.
     if add_note(message.from_user.id, note):
         count = len(get_notes(message.from_user.id))
-        bot.send_message(message.chat.id, f"Got it — saved. You now have {count} note(s).")
+        bot.send_message(message.chat.id, f"Consider it done — that's locked away safe. {count} thing(s) on the books now.")
     else:
         # Storage unconfigured (stateless mode) or a write error.
         bot.send_message(
             message.chat.id,
-            "I can't save notes right now — memory isn't set up on this bot.",
+            "Can't keep notes right now — the ledger's closed on this bot.",
         )
 
 
@@ -369,17 +371,17 @@ def cmd_recall(message):
     if store is None:
         bot.send_message(
             message.chat.id,
-            "I can't recall notes right now — memory isn't set up on this bot.",
+            "Can't pull up the books right now — the ledger's closed on this bot.",
         )
         return
     notes = get_notes(message.from_user.id)
     if not notes:
         bot.send_message(
             message.chat.id,
-            "You don't have any saved notes yet. Add one with /remember <note>.",
+            "You ain't given me nothin' to remember yet. Use /remember <note> and I'll keep it safe.",
         )
         return
-    lines = ["Your notes:"] + [f"{i}. {note}" for i, note in enumerate(notes, 1)]
+    lines = ["Here's what I got on you:"] + [f"{i}. {note}" for i, note in enumerate(notes, 1)]
     # send_reply handles Telegram's 4096-char limit if the list is long.
     send_reply(message, "\n".join(lines))
 
@@ -389,15 +391,15 @@ def cmd_forget(message):
     if store is None:
         bot.send_message(
             message.chat.id,
-            "There's nothing to forget — memory isn't set up on this bot.",
+            "Nothin' to forget — the ledger's closed on this bot.",
         )
         return
     had = len(get_notes(message.from_user.id))
     if not had:
-        bot.send_message(message.chat.id, "You have no saved notes to forget.")
+        bot.send_message(message.chat.id, "You got nothin' on the books to forget.")
         return
     clear_notes(message.from_user.id)
-    bot.send_message(message.chat.id, f"Done — deleted all {had} of your notes.")
+    bot.send_message(message.chat.id, f"Done — wiped clean, all {had} of 'em. Never happened, capisce?")
 
 
 @bot.message_handler(content_types=["text"], func=is_allowed)
@@ -411,7 +413,7 @@ def handle_message(message):
         return
     _log(message, "in", text)
     if is_rate_limited(message.from_user.id):
-        limit_msg = f"You've reached the daily limit of {RATE_LIMIT} messages. Try again tomorrow."
+        limit_msg = f"You've used up your {RATE_LIMIT} favors for today. Come back tomorrow, capisce?"
         bot.send_message(message.chat.id, limit_msg)
         _log(message, "out", f"[rate limited] {limit_msg}")
         return
@@ -422,6 +424,6 @@ def handle_message(message):
         _log(message, "out", reply)
     except Exception as e:
         print(f"Error in handle_message: {e}")
-        bot.send_message(message.chat.id, "Something went wrong. Please try again.")
+        bot.send_message(message.chat.id, "Somethin' went sideways on my end. Try that again, kid.")
         _log(message, "out", f"[error] {e}")
 

@@ -59,7 +59,7 @@ def test_handle_message_rate_limited():
         handle_message(make_message())
         mock_ask.assert_not_called()
         mock_bot.send_message.assert_called_once()
-        assert "daily limit" in mock_bot.send_message.call_args[0][1]
+        assert "favors" in mock_bot.send_message.call_args[0][1]
 
 
 def test_handle_message_sends_generic_error():
@@ -74,7 +74,7 @@ def test_handle_message_sends_generic_error():
 
         handle_message(make_message())
         error_msg = mock_bot.send_message.call_args[0][1]
-        assert "Something went wrong" in error_msg
+        assert "sideways" in error_msg
         assert "API key" not in error_msg
 
 
