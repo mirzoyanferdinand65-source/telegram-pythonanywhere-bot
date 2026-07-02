@@ -6,6 +6,8 @@ A minimal Python Telegram bot running on PythonAnywhere (free tier) with persist
 
 **All services used are free. No credit card required.**
 
+Deployment smoke test: 2026-07-02.
+
 > **Live demo:** <a href="https://t.me/tele_pythonanywhere_bot" target="_blank"><img src="https://img.shields.io/badge/Chat%20on-Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Chat on Telegram"/></a>
 
 ---
