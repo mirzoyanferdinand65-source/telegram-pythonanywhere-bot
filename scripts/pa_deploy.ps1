@@ -106,7 +106,11 @@ $PaApi               = "https://www.pythonanywhere.com/api/v0/user/$PaUsername"
 $Domain              = "$PaUsername.pythonanywhere.com"
 $ProjectDir          = "/home/$PaUsername/$RepoName"
 $VenvDir             = "/home/$PaUsername/.virtualenvs/telegram-bot"
-$WsgiFile            = "/var/www/${PaUsername}_pythonanywhere_com_wsgi.py"
+# PA always lowercases the username in this filename regardless of the
+# account's display casing (e.g. user "Ferdinand777" gets
+# ferdinand777_pythonanywhere_com_wsgi.py) — the home directory and API
+# paths above stay case-sensitive as entered, only this one is lowercased.
+$WsgiFile            = "/var/www/$($PaUsername.ToLower())_pythonanywhere_com_wsgi.py"
 $WebhookUrlResolved  = "https://$Domain/api/webhook"
 $PythonVersion       = 'python313'
 
@@ -120,6 +124,33 @@ Write-Host ""
 # ---- HTTP helper (PA API) ---------------------------------------------------
 # Returns @{ Code; Body }. -SkipHttpErrorCheck keeps 4xx/5xx from throwing so we
 # can branch on the status code (PA returns 403 for a missing web app, etc.).
+#
+# Status is read from $resp.StatusCode rather than -StatusCodeVariable, and the
+# timeout parameter name is detected at load time: newer Invoke-WebRequest
+# builds (PowerShell 7.6+) dropped -StatusCodeVariable and -TimeoutSec in favor
+# of -ConnectionTimeoutSeconds/-OperationTimeoutSeconds. Passing an unsupported
+# parameter name throws a parameter-binding error that Invoke-Pa's own
+# try/catch would otherwise swallow as Code=0 — misreported upstream as "PA API
+# rejected the token" even when the credentials are fine.
+$script:IwrParams = (Get-Command Invoke-WebRequest).Parameters
+$script:IwrTimeoutParam =
+    if ($script:IwrParams.ContainsKey('TimeoutSec')) { 'TimeoutSec' }
+    elseif ($script:IwrParams.ContainsKey('OperationTimeoutSeconds')) { 'OperationTimeoutSeconds' }
+    else { $null }
+
+# Invoke-WebRequest auto-encodes a hashtable -Body as
+# application/x-www-form-urlencoded, but which HTTP methods that
+# auto-detection covers varies by build — newer builds have been observed
+# doing it for POST but not PATCH, silently sending an empty Content-Type
+# instead (PA's API then rejects it with 415). Encoding explicitly here
+# sidesteps the cmdlet's per-method guessing entirely.
+function ConvertTo-FormUrlEncoded {
+    param([hashtable]$Fields)
+    ($Fields.GetEnumerator() | ForEach-Object {
+        "{0}={1}" -f [Uri]::EscapeDataString([string]$_.Key), [Uri]::EscapeDataString([string]$_.Value)
+    }) -join '&'
+}
+
 function Invoke-Pa {
     param(
         [string]$Method = 'Get',
@@ -133,14 +164,19 @@ function Invoke-Pa {
     $headers = @{}
     if (-not $NoAuth) { $headers['Authorization'] = "Token $PaToken" }
     $p = @{
-        Uri = $uri; Method = $Method; Headers = $headers; TimeoutSec = $TimeoutSec
-        SkipHttpErrorCheck = $true; StatusCodeVariable = 'code'
+        Uri = $uri; Method = $Method; Headers = $headers
+        SkipHttpErrorCheck = $true
     }
-    if ($Form)              { $p.Form = $Body }
-    elseif ($null -ne $Body) { $p.Body = $Body }
+    if ($script:IwrTimeoutParam) { $p[$script:IwrTimeoutParam] = $TimeoutSec }
+    if ($Form) {
+        $p.Form = $Body
+    } elseif ($null -ne $Body) {
+        $p.Body = ConvertTo-FormUrlEncoded $Body
+        $p.ContentType = 'application/x-www-form-urlencoded'
+    }
     try {
         $resp = Invoke-WebRequest @p
-        return [pscustomobject]@{ Code = [int]$code; Body = [string]$resp.Content }
+        return [pscustomobject]@{ Code = [int]$resp.StatusCode; Body = [string]$resp.Content }
     } catch {
         # Network-level failure (DNS, TLS, timeout) — no HTTP status.
         return [pscustomobject]@{ Code = 0; Body = [string]$_.Exception.Message }

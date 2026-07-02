@@ -122,7 +122,11 @@ def _pa_wsgi_path() -> str:
     graceful worker reload on the next request.
 
     Honors PA_WSGI_PATH as an explicit override for non-default PA
-    layouts; otherwise derives from $USER.
+    layouts; otherwise derives from $USER. PA always lowercases the
+    username in this filename regardless of the account's display
+    casing (e.g. user "Ferdinand777" gets
+    /var/www/ferdinand777_pythonanywhere_com_wsgi.py), so $USER is
+    lowercased before building the candidate path.
     """
     override = os.environ.get("PA_WSGI_PATH", "").strip()
     if override:
@@ -130,7 +134,7 @@ def _pa_wsgi_path() -> str:
     user = os.environ.get("USER") or os.environ.get("LOGNAME") or ""
     if not user:
         return ""
-    candidate = f"/var/www/{user}_pythonanywhere_com_wsgi.py"
+    candidate = f"/var/www/{user.lower()}_pythonanywhere_com_wsgi.py"
     return candidate if os.path.exists(candidate) else ""
 
 

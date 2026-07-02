@@ -93,7 +93,12 @@ AUTH_HEADER="Authorization: Token $PA_API_TOKEN"
 DOMAIN="${PA_USERNAME}.pythonanywhere.com"
 PROJECT_DIR="/home/${PA_USERNAME}/${REPO_NAME}"
 VENV_DIR="/home/${PA_USERNAME}/.virtualenvs/telegram-bot"
-WSGI_FILE="/var/www/${PA_USERNAME}_pythonanywhere_com_wsgi.py"
+# PA always lowercases the username in this filename regardless of the
+# account's display casing (e.g. user "Ferdinand777" gets
+# ferdinand777_pythonanywhere_com_wsgi.py) — the home directory and API
+# paths above stay case-sensitive as entered, only this one is lowercased.
+PA_USERNAME_LOWER="$(echo "$PA_USERNAME" | tr '[:upper:]' '[:lower:]')"
+WSGI_FILE="/var/www/${PA_USERNAME_LOWER}_pythonanywhere_com_wsgi.py"
 WEBHOOK_URL_RESOLVED="https://${DOMAIN}/api/webhook"
 PYTHON_VERSION="python313"
 
