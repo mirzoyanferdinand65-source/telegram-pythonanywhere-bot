@@ -122,6 +122,10 @@ HISTORY_TTL = 2592000  # conversation history expires after 30 days (seconds)
 MAX_NOTES = 100  # /remember notes kept per user (oldest dropped past this)
 RATE_LIMIT = int(os.environ.get("RATE_LIMIT", "250"))  # max messages per user per day
 
+# Casino (virtual currency only — no real money involved anywhere).
+CASINO_STARTING_BALANCE = 100  # dollars a new user starts with
+CASINO_MIN_BALANCE = 5  # balance never drops below this, so a losing streak can't lock someone out
+
 # Comma-separated whitelist of Telegram users. Each entry is either a
 # username (with or without leading @) or a numeric user_id. Empty
 # (default) means everyone can talk to the bot. When non-empty, the

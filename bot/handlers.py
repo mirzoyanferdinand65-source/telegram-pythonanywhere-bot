@@ -10,6 +10,7 @@ from bot.config import (
     SYSTEM_PROMPT,
 )
 from bot.ai import ask_ai
+from bot.casino import get_balance, spin_slots
 from bot.helpers import is_allowed, keep_typing, send_reply, should_respond
 from bot.history import clear_history
 from bot.notes import add_note, clear_notes, get_notes
@@ -141,6 +142,8 @@ def cmd_help(message):
         "/remember <note> — I'll keep that safe, between us",
         "/recall — see what I got on the books",
         "/forget — clean the books",
+        "/balance — check what you're carrying",
+        "/slots <bet> — try your luck at the tables",
     ]
     if HF_SPACE_ID:
         lines.append("/model — switch who's runnin' the show")
@@ -400,6 +403,57 @@ def cmd_forget(message):
         return
     clear_notes(message.from_user.id)
     bot.send_message(message.chat.id, f"Done — wiped clean, all {had} of 'em. Never happened, capisce?")
+
+
+# --- Casino (virtual currency only — no real money involved anywhere) ---
+
+
+@bot.message_handler(commands=["balance"], func=is_allowed)
+def cmd_balance(message):
+    if store is None:
+        bot.send_message(
+            message.chat.id,
+            "Can't check your tab right now — the ledger's closed on this bot.",
+        )
+        return
+    balance = get_balance(message.from_user.id)
+    bot.send_message(message.chat.id, f"You're carrying ${balance}, kid.")
+
+
+@bot.message_handler(commands=["slots"], func=is_allowed)
+def cmd_slots(message):
+    if store is None:
+        bot.send_message(
+            message.chat.id,
+            "The casino's closed — the ledger's not set up on this bot.",
+        )
+        return
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) < 2:
+        bot.send_message(message.chat.id, "Usage: /slots <bet>\nExample: /slots 10")
+        return
+    try:
+        bet = int(parts[1].strip())
+    except ValueError:
+        bot.send_message(message.chat.id, "That ain't a number, kid. Usage: /slots <bet>")
+        return
+    if bet <= 0:
+        bot.send_message(message.chat.id, "Gotta put somethin' on the table, kid — try a positive number.")
+        return
+    balance = get_balance(message.from_user.id)
+    if bet > balance:
+        bot.send_message(message.chat.id, f"You're light, kid. You've only got ${balance} on you.")
+        return
+    result = spin_slots(message.from_user.id, bet)
+    reel = " | ".join(result["symbols"])
+    if result["win"]:
+        text = (
+            f"[ {reel} ]\n\n"
+            f"Jackpot, kid! That's ${result['payout']} for ya. Balance: ${result['balance']}."
+        )
+    else:
+        text = f"[ {reel} ]\n\nTough break — the house wins this one. Balance: ${result['balance']}."
+    bot.send_message(message.chat.id, text)
 
 
 @bot.message_handler(content_types=["text"], func=is_allowed)
