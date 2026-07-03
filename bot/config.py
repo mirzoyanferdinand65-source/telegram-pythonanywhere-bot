@@ -82,7 +82,7 @@ WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").strip()
 # AI provider
 AI_API_KEY = os.environ["AI_API_KEY"].strip()
 AI_BASE_URL = os.environ.get("AI_BASE_URL", "https://api.cerebras.ai/v1").strip()
-MODEL = os.environ.get("AI_MODEL", "gpt-oss-120b").strip()
+MODEL = os.environ.get("AI_MODEL", "llama3.1-70b").strip()
 
 # Hugging Face provider (optional) — when set, users can switch via /model
 HF_SPACE_ID = os.environ.get("HF_SPACE_ID", "").strip()
@@ -107,46 +107,34 @@ DEPLOY_SECRET = os.environ.get("DEPLOY_SECRET", "").strip()
 
 # App
 SYSTEM_PROMPT = (
-    "You are a warm but theatrical Italian-American mafia don — think classic gangster "
-    "movies (Godfather/Sopranos style), not a real criminal. Speak with old-school "
-    "gangster flair: call the user 'kid', 'pal', or 'friend', reference 'the family', "
-    "'respect', and 'favors', and sprinkle in the occasional 'capisce' or 'fuhgeddaboutit' "
-    "without overdoing it. Underneath the theatrical voice you are genuinely helpful, "
-    "generous with good advice, and never actually threatening, hateful, or cruel — this "
-    "is a fun bit, like a movie character. Answer the user's actual question clearly and "
-    "correctly underneath the flavor; don't let the persona get in the way of being useful. "
-    "Keep replies fairly short and punchy."
+    "You are a sharp, wise, and deeply protective Armenian legal advisor named 'Ardar' (Արդար). "
+    "Speak with absolute authority, respect, and a grounded, trustworthy demeanor. Your sole mission "
+    "is to protect and educate the citizens of the Republic of Armenia (RA) regarding their legal rights. "
+    "Underneath the respectful, sharp tone, you must be incredibly precise: never guess or hallucinate laws. "
+    "Every time you explain a tax, right, or deadline, you MUST cite the specific Code and Article (e.g., "
+    "'According to Article 258 of the RA Tax Code...'). If you lack the exact data, tell the user honestly "
+    "to consult the State Revenue Committee (SRC) or a professional lawyer. Translate complex legal jargon "
+    "into simple, crystal-clear everyday language. Keep your replies structured, punchy, and use bolding "
+    "for key numbers, percentages, and deadlines. End financial/legal responses with a standard, brief "
+    "educational disclaimer."
 )
 MAX_HISTORY = 20  # messages kept per user (10 conversation turns)
 HISTORY_TTL = 2592000  # conversation history expires after 30 days (seconds)
 MAX_NOTES = 100  # /remember notes kept per user (oldest dropped past this)
-RATE_LIMIT = int(os.environ.get("RATE_LIMIT", "250"))  # max messages per user per day
+RATE_LIMIT = int(os.environ.get("RATE_LIMIT", "40"))  # Optimized daily maximum for public stability
 
-# Casino (virtual currency only — no real money involved anywhere).
-CASINO_STARTING_BALANCE = 100  # dollars a new user starts with
-CASINO_MIN_BALANCE = 5  # balance never drops below this, so a losing streak can't lock someone out
 
 # Comma-separated whitelist of Telegram users. Each entry is either a
 # username (with or without leading @) or a numeric user_id. Empty
 # (default) means everyone can talk to the bot. When non-empty, the
 # bot stays silent for anyone not in the list — silence instead of a
 # rejection message so scanners don't get confirmation the bot exists.
-#
-# Example: ALLOWED_USERS=@alice,bob,123456789
 ALLOWED_USERS = [
     u.strip().lstrip("@")
     for u in os.environ.get("ALLOWED_USERS", "").split(",")
     if u.strip()
 ]
 MAX_MSG_LEN = 4096  # Telegram's character limit per message
-# Provider call budget. Total worst case =
-# AI_RETRIES * AI_REQUEST_TIMEOUT + sum of backoff sleeps. With
-# retries=2 and timeout=25s plus 1s backoff: 25 + 1 + 25 = 51s.
 AI_REQUEST_TIMEOUT = 25  # seconds, applied per-attempt to OpenAI-compatible calls
 AI_RETRIES = 2  # total attempts (not extra retries) — 2 means one retry on failure
-# HF Gradio request timeout. Without this a hung `predict()` would occupy the
-# PA worker indefinitely; combined with the dedupe pre-claim, Telegram's
-# retries get silently dropped for ~10 min. Tuned to give ArmGPT enough
-# headroom for cold-start jitter while still freeing the worker before
-# Telegram's webhook timeout (~60s).
 HF_REQUEST_TIMEOUT = 50
