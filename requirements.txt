@@ -3,4 +3,5 @@ pyTelegramBotAPI==4.32.0
 openai==2.30.0
 requests==2.33.1
 gradio-client==1.7.0
+pypdf==5.1.0
 pytest==9.0.2

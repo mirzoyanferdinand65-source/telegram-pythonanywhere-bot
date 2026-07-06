@@ -1,12 +1,14 @@
 import threading
 from contextlib import contextmanager
 from bot.clients import bot
-from bot.config import ALLOWED_USERS, MAX_MSG_LEN
+from bot.config import ADMIN_USERS, ALLOWED_USERS, MAX_MSG_LEN
 
 # Pre-compute lookup sets so per-message is_allowed() is O(1).
 # Numeric IDs are matched as strings against str(user.id).
 _ALLOWED_USERNAMES = {u.lower() for u in ALLOWED_USERS if not u.isdigit()}
 _ALLOWED_USER_IDS = {u for u in ALLOWED_USERS if u.isdigit()}
+_ADMIN_USERNAMES = {u.lower() for u in ADMIN_USERS if not u.isdigit()}
+_ADMIN_USER_IDS = {u for u in ADMIN_USERS if u.isdigit()}
 
 # Telegram "typing" chat action expires after ~5 seconds, so re-send it every
 # 4 seconds while slow providers (e.g. HF ArmGPT) are generating.
@@ -108,3 +110,17 @@ def is_allowed(message) -> bool:
         return True
     username = getattr(user, "username", "") or ""
     return username.lower() in _ALLOWED_USERNAMES
+
+
+def is_admin(message) -> bool:
+    """True only for users in ADMIN_USERS (by numeric id or username).
+
+    Fail-closed: when ADMIN_USERS is empty, nobody is an admin, so the
+    document-upload handler stays locked until an admin is configured."""
+    user = getattr(message, "from_user", None)
+    if user is None:
+        return False
+    if str(getattr(user, "id", "")) in _ADMIN_USER_IDS:
+        return True
+    username = getattr(user, "username", "") or ""
+    return bool(_ADMIN_USERNAMES) and username.lower() in _ADMIN_USERNAMES

@@ -1,16 +1,19 @@
 import os
 from datetime import datetime
+from telebot import types
 from bot.clients import bot, BOT_INFO, store
 from bot.config import (
     COMMIT_SHA,
     HF_SPACE_ID,
     HOSTING_LABEL,
+    KB_MAX_UPLOAD_BYTES,
     MODEL,
     RATE_LIMIT,
     SYSTEM_PROMPT,
 )
+from bot import knowledge
 from bot.ai import ask_ai
-from bot.helpers import is_allowed, keep_typing, send_reply, should_respond
+from bot.helpers import is_admin, is_allowed, keep_typing, send_reply, should_respond
 from bot.history import clear_history
 from bot.notes import add_note, clear_notes, get_notes
 from bot.preferences import get_provider, set_provider
@@ -142,6 +145,7 @@ def cmd_help(message):
         "/remember <note> — Store a custom legal reminder or bookmark",
         "/recall — View your saved reminders and bookmarks",
         "/forget — Clear your saved reminders layout",
+        "/documents — Browse and download the official legal documents",
     ]
     if HF_SPACE_ID:
         lines.append("/model — Toggle the backend processing model")
@@ -285,6 +289,151 @@ def cmd_forget(message):
         return
     clear_notes(message.from_user.id)
     bot.send_message(message.chat.id, f"🧹 Action completed. All {had} registered notebook entries have been permanently purged.")
+
+
+# --- Knowledge base: document upload (admin), listing, and download ---
+
+
+@bot.message_handler(commands=["myid"], func=is_allowed)
+def cmd_myid(message):
+    # Lets the owner discover the numeric ID to put in ADMIN_USERS.
+    bot.send_message(
+        message.chat.id,
+        f"Your Telegram user ID: `{message.from_user.id}`",
+        parse_mode="Markdown",
+    )
+
+
+@bot.message_handler(content_types=["document"], func=is_allowed)
+def handle_document(message):
+    """Ingest an admin-uploaded PDF into the knowledge base.
+
+    Only admins (ADMIN_USERS) may upload; everyone else gets a polite refusal
+    so the knowledge base can't be poisoned. The PDF is downloaded, its text
+    extracted and indexed, and Telegram's file_id is stored so the file can be
+    re-sent to any user via /documents without keeping it on the server."""
+    if not is_admin(message):
+        bot.send_message(
+            message.chat.id,
+            "⛔ Only the administrator can add documents to my knowledge base.",
+        )
+        return
+    if not knowledge.available():
+        bot.send_message(
+            message.chat.id,
+            "Knowledge base is not configured — persistent storage (SQLITE_PATH) is required.",
+        )
+        return
+    doc = message.document
+    name = (getattr(doc, "file_name", None) or "document.pdf").strip()
+    if not name.lower().endswith(".pdf"):
+        bot.send_message(message.chat.id, "Please send a PDF file (a .pdf document).")
+        return
+    if (getattr(doc, "file_size", 0) or 0) > KB_MAX_UPLOAD_BYTES:
+        bot.send_message(
+            message.chat.id,
+            "That file is larger than 20 MB — Telegram bots can't download files that big. "
+            "Please split it into smaller PDFs and send them one by one.",
+        )
+        return
+    try:
+        with keep_typing(message.chat.id):
+            file_info = bot.get_file(doc.file_id)
+            data = bot.download_file(file_info.file_path)
+            result = knowledge.ingest(
+                data,
+                title=name,
+                file_id=doc.file_id,
+                file_unique_id=getattr(doc, "file_unique_id", None),
+                uploader_id=message.from_user.id,
+            )
+    except Exception as e:
+        print(f"Document ingest error: {e}")
+        bot.send_message(message.chat.id, "⚠️ Failed to download or process that document.")
+        return
+    if result.get("ok"):
+        bot.send_message(
+            message.chat.id,
+            f"✅ Indexed *{result['title']}* — {result['chunk_count']} searchable sections "
+            f"(uploaded {result['upload_date']}).\n\nMy answers will now cite it when relevant, "
+            "and users can download it via /documents.",
+            parse_mode="Markdown",
+        )
+        _log(message, "out", f"[ingested] {result['title']} ({result['chunk_count']} chunks)")
+    else:
+        bot.send_message(message.chat.id, f"⚠️ {result.get('error', 'Could not index the document.')}")
+
+
+@bot.message_handler(commands=["documents"], func=is_allowed)
+def cmd_documents(message):
+    """List available documents with inline download buttons for any user."""
+    docs = knowledge.list_documents()
+    if not docs:
+        bot.send_message(
+            message.chat.id,
+            "📚 No documents have been uploaded yet. The administrator can add legal "
+            "codes and the Constitution, and they'll show up here for download.",
+        )
+        return
+    markup = types.InlineKeyboardMarkup()
+    lines = ["📚 *Available legal documents:*", ""]
+    for d in docs:
+        suffix = f" — id {d['doc_id']}" if is_admin(message) else ""
+        lines.append(f"• {d['title']} (uploaded {d['upload_date']}){suffix}")
+        if d.get("file_id"):
+            markup.add(
+                types.InlineKeyboardButton(
+                    f"⬇ {d['title']}", callback_data=f"kbdl:{d['doc_id']}"
+                )
+            )
+    bot.send_message(
+        message.chat.id, "\n".join(lines), reply_markup=markup, parse_mode="Markdown"
+    )
+
+
+@bot.callback_query_handler(func=lambda c: (getattr(c, "data", "") or "").startswith("kbdl:"))
+def cb_download_document(call):
+    """Re-send a stored document to the user who tapped its download button."""
+    try:
+        doc_id = int(call.data.split(":", 1)[1])
+    except (ValueError, IndexError):
+        return
+    d = knowledge.get_document(doc_id)
+    if not d or not d.get("file_id"):
+        bot.answer_callback_query(call.id, "That document is no longer available.")
+        return
+    try:
+        bot.send_document(
+            call.message.chat.id,
+            d["file_id"],
+            caption=f"{d['title']} (uploaded {d['upload_date']})",
+        )
+        bot.answer_callback_query(call.id)
+    except Exception as e:
+        print(f"Document download error: {e}")
+        bot.answer_callback_query(call.id, "Could not send that file.")
+
+
+@bot.message_handler(commands=["deldoc"], func=is_allowed)
+def cmd_deldoc(message):
+    """Admin-only: remove a document (and its index) by id (see /documents)."""
+    if not is_admin(message):
+        bot.send_message(message.chat.id, "⛔ Only the administrator can remove documents.")
+        return
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip().isdigit():
+        bot.send_message(
+            message.chat.id,
+            "Usage: `/deldoc <document id>` — run /documents to see each id.",
+            parse_mode="Markdown",
+        )
+        return
+    doc_id = int(parts[1].strip())
+    d = knowledge.get_document(doc_id)
+    if knowledge.delete_document(doc_id):
+        bot.send_message(message.chat.id, f"🗑️ Removed *{d['title']}* from the knowledge base.", parse_mode="Markdown")
+    else:
+        bot.send_message(message.chat.id, f"No document with id {doc_id} was found.")
 
 
 @bot.message_handler(content_types=["text"], func=is_allowed)

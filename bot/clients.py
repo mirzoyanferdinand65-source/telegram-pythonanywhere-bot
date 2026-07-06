@@ -113,6 +113,7 @@ def register_commands() -> str:
         BotCommand("remember", "Save a legal note or reminder"),
         BotCommand("recall", "Show your saved legal notes"),
         BotCommand("forget", "Delete your saved legal notes"),
+        BotCommand("documents", "Browse and download legal documents"),
     ]
     if HF_SPACE_ID:
         commands.append(BotCommand("model", "Switch the processing engine"))

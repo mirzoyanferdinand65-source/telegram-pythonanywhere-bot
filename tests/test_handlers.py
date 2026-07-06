@@ -419,6 +419,193 @@ def test_cmd_model_not_registered_without_hf_space_id():
     assert not hasattr(bot.handlers, "cmd_model")
 
 
+# ── Knowledge base: upload / list / download / admin ──────────────────────────
+
+
+def make_doc_message(file_name="RA Tax Code.pdf", file_size=1000, user_id=123, chat_id=456):
+    msg = MagicMock()
+    msg.from_user.id = user_id
+    msg.chat.id = chat_id
+    msg.document.file_name = file_name
+    msg.document.file_size = file_size
+    msg.document.file_id = "FILEID"
+    msg.document.file_unique_id = "UNIQ"
+    return msg
+
+
+class _NullTyping:
+    def __enter__(self):
+        return None
+
+    def __exit__(self, *a):
+        return False
+
+
+def test_handle_document_rejected_for_non_admin():
+    with (
+        patch("bot.handlers.is_admin", return_value=False),
+        patch("bot.handlers.knowledge") as mock_kb,
+        patch("bot.handlers.bot") as mock_bot,
+    ):
+        from bot.handlers import handle_document
+
+        handle_document(make_doc_message())
+        mock_kb.ingest.assert_not_called()
+        assert "administrator" in mock_bot.send_message.call_args[0][1].lower()
+
+
+def test_handle_document_ingests_for_admin():
+    with (
+        patch("bot.handlers.is_admin", return_value=True),
+        patch("bot.handlers.keep_typing", return_value=_NullTyping()),
+        patch("bot.handlers.knowledge") as mock_kb,
+        patch("bot.handlers.bot") as mock_bot,
+    ):
+        mock_kb.available.return_value = True
+        mock_bot.get_file.return_value = MagicMock(file_path="path/f.pdf")
+        mock_bot.download_file.return_value = b"%PDF-data"
+        mock_kb.ingest.return_value = {
+            "ok": True,
+            "title": "RA Tax Code.pdf",
+            "chunk_count": 12,
+            "upload_date": "12.05.24",
+        }
+        from bot.handlers import handle_document
+
+        handle_document(make_doc_message())
+        mock_kb.ingest.assert_called_once()
+        assert b"%PDF-data" == mock_kb.ingest.call_args[0][0]
+        assert "Indexed" in mock_bot.send_message.call_args[0][1]
+
+
+def test_handle_document_rejects_non_pdf():
+    with (
+        patch("bot.handlers.is_admin", return_value=True),
+        patch("bot.handlers.knowledge") as mock_kb,
+        patch("bot.handlers.bot") as mock_bot,
+    ):
+        mock_kb.available.return_value = True
+        from bot.handlers import handle_document
+
+        handle_document(make_doc_message(file_name="notes.txt"))
+        mock_kb.ingest.assert_not_called()
+        assert "PDF" in mock_bot.send_message.call_args[0][1]
+
+
+def test_handle_document_rejects_oversize():
+    with (
+        patch("bot.handlers.is_admin", return_value=True),
+        patch("bot.handlers.knowledge") as mock_kb,
+        patch("bot.handlers.bot") as mock_bot,
+    ):
+        mock_kb.available.return_value = True
+        from bot.handlers import handle_document
+
+        handle_document(make_doc_message(file_size=25 * 1024 * 1024))
+        mock_kb.ingest.assert_not_called()
+        assert "20 MB" in mock_bot.send_message.call_args[0][1]
+
+
+def test_cmd_documents_empty():
+    with (
+        patch("bot.handlers.knowledge") as mock_kb,
+        patch("bot.handlers.bot") as mock_bot,
+    ):
+        mock_kb.list_documents.return_value = []
+        from bot.handlers import cmd_documents
+
+        cmd_documents(make_message())
+        assert "No documents" in mock_bot.send_message.call_args[0][1]
+
+
+def test_cmd_documents_lists_with_buttons():
+    with (
+        patch("bot.handlers.is_admin", return_value=False),
+        patch("bot.handlers.knowledge") as mock_kb,
+        patch("bot.handlers.bot") as mock_bot,
+        patch("bot.handlers.types") as mock_types,
+    ):
+        mock_kb.list_documents.return_value = [
+            {"doc_id": 1, "title": "RA Tax Code", "upload_date": "12.05.24", "file_id": "F1", "chunk_count": 9},
+        ]
+        markup = MagicMock()
+        mock_types.InlineKeyboardMarkup.return_value = markup
+        from bot.handlers import cmd_documents
+
+        cmd_documents(make_message())
+        sent = mock_bot.send_message.call_args[0][1]
+        assert "RA Tax Code" in sent and "12.05.24" in sent
+        markup.add.assert_called_once()  # one download button
+
+
+def test_cb_download_document_sends_file():
+    with (
+        patch("bot.handlers.knowledge") as mock_kb,
+        patch("bot.handlers.bot") as mock_bot,
+    ):
+        mock_kb.get_document.return_value = {
+            "doc_id": 1, "title": "RA Tax Code", "upload_date": "12.05.24", "file_id": "F1", "chunk_count": 9,
+        }
+        call = MagicMock()
+        call.data = "kbdl:1"
+        call.message.chat.id = 456
+        from bot.handlers import cb_download_document
+
+        cb_download_document(call)
+        mock_bot.send_document.assert_called_once()
+        assert mock_bot.send_document.call_args[0][1] == "F1"
+
+
+def test_cb_download_document_missing():
+    with (
+        patch("bot.handlers.knowledge") as mock_kb,
+        patch("bot.handlers.bot") as mock_bot,
+    ):
+        mock_kb.get_document.return_value = None
+        call = MagicMock()
+        call.data = "kbdl:99"
+        from bot.handlers import cb_download_document
+
+        cb_download_document(call)
+        mock_bot.send_document.assert_not_called()
+        mock_bot.answer_callback_query.assert_called_once()
+
+
+def test_cmd_myid_reports_numeric_id():
+    with patch("bot.handlers.bot") as mock_bot:
+        from bot.handlers import cmd_myid
+
+        cmd_myid(make_message(user_id=777))
+        assert "777" in mock_bot.send_message.call_args[0][1]
+
+
+def test_cmd_deldoc_admin_deletes():
+    with (
+        patch("bot.handlers.is_admin", return_value=True),
+        patch("bot.handlers.knowledge") as mock_kb,
+        patch("bot.handlers.bot") as mock_bot,
+    ):
+        mock_kb.get_document.return_value = {"doc_id": 3, "title": "Old Code", "upload_date": "01.01.24", "file_id": "F", "chunk_count": 1}
+        mock_kb.delete_document.return_value = True
+        from bot.handlers import cmd_deldoc
+
+        cmd_deldoc(make_message(text="/deldoc 3"))
+        mock_kb.delete_document.assert_called_once_with(3)
+        assert "Removed" in mock_bot.send_message.call_args[0][1]
+
+
+def test_cmd_deldoc_rejected_for_non_admin():
+    with (
+        patch("bot.handlers.is_admin", return_value=False),
+        patch("bot.handlers.knowledge") as mock_kb,
+        patch("bot.handlers.bot") as mock_bot,
+    ):
+        from bot.handlers import cmd_deldoc
+
+        cmd_deldoc(make_message(text="/deldoc 3"))
+        mock_kb.delete_document.assert_not_called()
+
+
 def test_handle_message_uses_keep_typing():
     """handle_message should wrap ask_ai in the keep_typing context."""
     with (

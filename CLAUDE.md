@@ -25,6 +25,7 @@ telegram-pythonanywhere-bot/
 │   ├── store.py          # SqliteStore — KV with lazy TTL expiry, backed by sqlite3
 │   ├── ai.py             # ask_ai() — history + dispatch to providers
 │   ├── providers.py      # Provider dispatch: OpenAI-compatible (with retry) or HF Gradio space
+│   ├── knowledge.py      # RAG knowledge base — PDF ingest + SQLite FTS5 retrieval + citations
 │   ├── preferences.py    # Per-user provider preference stored via store
 │   ├── history.py        # get/save/clear conversation history via store (graceful degradation)
 │   ├── rate_limit.py     # Per-user daily message rate limiting via store (graceful degradation)
@@ -89,6 +90,8 @@ telegram-pythonanywhere-bot/
 | `WEBHOOK_URL` | No | — | When set, the bot auto-registers this URL as the Telegram webhook on every worker boot and after every `/api/deploy`. No manual `setWebhook` step needed. Idempotent. On PA, value is `https://<your-pa-username>.pythonanywhere.com/api/webhook`. Leave unset for local polling |
 | `RATE_LIMIT` | No | `250` | Max messages per user per day |
 | `ALLOWED_USERS` | No | _open_ | Comma-separated whitelist of usernames (with/without `@`) or numeric user IDs. Empty = everyone allowed. Non-empty = silent drop for non-whitelisted (no rejection reply, no leak of bot existence). Implemented as `func=is_allowed` on every `@bot.message_handler` so telebot never dispatches the handler |
+| `ADMIN_USERS` | No | _empty_ | Comma-separated usernames / numeric IDs allowed to UPLOAD documents to the knowledge base (`bot/knowledge.py`). **Fail-closed:** empty = nobody can upload. Checked by `helpers.is_admin`. Users find their numeric ID via `/myid` |
+| `KB_TOP_K` | No | `4` | Number of text chunks retrieved from the knowledge base per user question |
 | `HOSTING_LABEL` | No | `PythonAnywhere` | Label shown by the `/about` command |
 | `DEPLOY_SECRET` | No | — | Enables `/api/deploy` auto-deploy webhook. Fail-closed: when unset, the endpoint returns 403. Generate with `openssl rand -hex 32` and set the same value as a GitHub repo secret named `DEPLOY_SECRET` so the workflow at `.github/workflows/deploy.yml` can call the endpoint |
 | `PA_WSGI_PATH` | No | _auto-detected_ | Absolute path of the PA WSGI file `/api/deploy` touches to reload the worker. Only needed when auto-detection fails (non-default PA layout / custom domain) — the deploy response says so explicitly when that happens |
@@ -170,6 +173,22 @@ The bot's storage layer is a thin KV-with-TTL abstraction in `bot/store.py` expo
 - **Performance vs. networked KV:** SQLite ops are in-process and take microseconds, vs. ~20–80ms per round-trip to a remote KV over HTTPS. The webhook reply latency for an average message is dominated by the AI call, not storage.
 
 ---
+
+## Knowledge base (RAG over uploaded PDFs)
+
+`bot/knowledge.py` lets the bot answer grounded in the *actual text* of uploaded legal documents (RA codes, the Constitution, etc.) instead of the model's memory — which both improves accuracy and lets every answer **cite its source**.
+
+**Why SQLite FTS5 and not embeddings.** PA's free tier can't reach a non-whitelisted embeddings API and can't fit torch/sentence-transformers. So retrieval uses **SQLite FTS5** (full-text search, compiled into stdlib `sqlite3`): pure local keyword/BM25 ranking, zero extra deps, zero extra network calls. The `unicode61` tokenizer case-folds and splits Armenian, Russian, and Latin alike, so a question in any of the three retrieves the right articles. The only added dependency is `pypdf` (pure-Python text extraction).
+
+**Enabled only when `SQLITE_PATH` is set AND the sqlite build has FTS5.** `knowledge._init()` probes FTS5 at import; on any failure the module disables itself and every function returns a safe default (`retrieve → []`, `ingest → {"ok": False}`), so the bot keeps working as a plain chat bot.
+
+**Flow:**
+- **Ingest** (admin only): admin sends a PDF → `handle_document` gates on `is_admin`, downloads via `bot.get_file`/`download_file` (Telegram's 20 MB `getFile` cap → `KB_MAX_UPLOAD_BYTES`), then `knowledge.ingest()` extracts text with pypdf, splits it into overlapping ~1200-char chunks, and indexes them in the `kb_chunks` FTS5 table. Metadata (title, upload date, Telegram `file_id`, uploader) goes in `kb_documents`. Re-uploading the same title **replaces** the prior version. An empty extraction ⇒ "looks like scanned images" error (no OCR on free tier).
+- **Answer**: `ai.ask_ai()` calls `knowledge.retrieve(question)` (FTS5 `MATCH` with each term quoted+OR-ed, ordered by `bm25()`), injects the top-K excerpts into the system prompt, and appends a footer: `📄 Based on: <title> (uploaded dd.mm.yy)`. If documents exist but none match, it notes the answer isn't document-backed; if no documents are loaded at all, no footer (reads naturally).
+- **Download**: `/documents` lists all files with inline buttons; the `kbdl:<id>` callback re-sends the stored `file_id` — so the PDF is served from Telegram's servers, never kept on PA's disk.
+- **Manage**: `/deldoc <id>` (admin) removes a document + its chunks. `/myid` reports the caller's numeric ID for `ADMIN_USERS`.
+
+**Gotchas:** FTS5 `MATCH` input must be sanitized — `_fts_query` tokenizes to `\w+`, drops 1-char noise (keeps digits so "Article 258" matches), quotes each term, and OR-joins them; never pass raw user text to `MATCH`. Files over 20 MB can't be ingested via Telegram — split them or ingest offline. Scanned/image PDFs need OCR, which the free tier can't run.
 
 ## Reliability
 

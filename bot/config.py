@@ -143,6 +143,26 @@ ALLOWED_USERS = [
     for u in os.environ.get("ALLOWED_USERS", "").split(",")
     if u.strip()
 ]
+
+# Admins may upload documents to the knowledge base (see bot/knowledge.py).
+# Same format as ALLOWED_USERS: comma-separated usernames (with/without @)
+# or numeric user IDs. Fail-closed: when empty, NOBODY can upload — the
+# document-ingest handler tells senders uploads aren't configured. Use
+# /myid in the bot to find your numeric ID.
+ADMIN_USERS = [
+    u.strip().lstrip("@")
+    for u in os.environ.get("ADMIN_USERS", "").split(",")
+    if u.strip()
+]
+
+# Knowledge base (RAG) tuning. Retrieval is SQLite FTS5 — no embeddings,
+# no extra network calls (works within PA's outbound whitelist).
+KB_TOP_K = int(os.environ.get("KB_TOP_K", "4"))  # chunks retrieved per query
+KB_CHUNK_SIZE = 1200  # target characters per indexed chunk
+KB_CHUNK_OVERLAP = 150  # characters of overlap between adjacent chunks
+KB_MAX_CONTEXT_CHARS = 6000  # cap on retrieved text injected into the prompt
+KB_MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # Telegram Bot API getFile limit (20 MB)
+
 MAX_MSG_LEN = 4096  # Telegram's character limit per message
 AI_REQUEST_TIMEOUT = 25  # seconds, applied per-attempt to OpenAI-compatible calls
 AI_RETRIES = 2  # total attempts (not extra retries) — 2 means one retry on failure
