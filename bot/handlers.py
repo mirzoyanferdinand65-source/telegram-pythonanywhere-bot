@@ -24,8 +24,8 @@ from bot.rate_limit import is_rate_limited
 _ABOUT_PROMPT = (
     "Introduce yourself to a new user in 3-4 short, warm, and professional lines: "
     "who you are (Ardar, the RA Legal Assistant) and how you can help them look up "
-    "laws, taxes, and legal codes. Do not analyze or define any word here — this "
-    "is just a friendly introduction."
+    "the laws, tax rules, and legal codes of the Republic of Armenia. Keep it to a "
+    "friendly introduction — do not answer a legal question or cite an article here."
 )
 # Shown if the live AI call fails (timeout, provider error, etc.) so /about
 # never breaks as a version/health probe.
@@ -39,8 +39,8 @@ _ABOUT_FALLBACK = (
 # from code — only this descriptive blurb is generated live.
 _HELP_PROMPT = (
     "In a few short, respectful lines and in your own voice, tell a new user what you can "
-    "do for them regarding RA jurisprudence and how to interact with you. Do not analyze "
-    "or define any word here — this is a description of your help, not an example."
+    "do for them regarding RA jurisprudence and how to interact with you. Keep it to a "
+    "description of your help — do not answer a legal question or cite an article here."
 )
 # Shown if the live AI call fails so /help always lists the commands.
 _HELP_FALLBACK = (

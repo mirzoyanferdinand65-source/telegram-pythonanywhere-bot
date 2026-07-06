@@ -105,17 +105,17 @@ def register_commands() -> str:
     from bot.config import HF_SPACE_ID
 
     commands = [
-        BotCommand("start", "Say hello and get started"),
-        BotCommand("help", "Show help and all commands"),
-        BotCommand("reset", "Clear our conversation and start fresh"),
-        BotCommand("about", "What powers me"),
-        BotCommand("sha", "Show the running code version"),
-        BotCommand("remember", "Save a note"),
-        BotCommand("recall", "Show all your saved notes"),
-        BotCommand("forget", "Delete all your saved notes"),
+        BotCommand("start", "Meet Ardar, your RA legal assistant"),
+        BotCommand("help", "Show help and available commands"),
+        BotCommand("reset", "Clear the consultation history"),
+        BotCommand("about", "Technical specifications and framework"),
+        BotCommand("sha", "Show the live deployment version"),
+        BotCommand("remember", "Save a legal note or reminder"),
+        BotCommand("recall", "Show your saved legal notes"),
+        BotCommand("forget", "Delete your saved legal notes"),
     ]
     if HF_SPACE_ID:
-        commands.append(BotCommand("model", "Switch the AI engine I run on"))
+        commands.append(BotCommand("model", "Switch the processing engine"))
 
     try:
         result = bot.set_my_commands(commands)
