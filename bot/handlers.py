@@ -30,8 +30,9 @@ _ABOUT_PROMPT = (
 # Shown if the live AI call fails (timeout, provider error, etc.) so /about
 # never breaks as a version/health probe.
 _ABOUT_FALLBACK = (
-    "Ողջույն, I am Ardar (Արդար), your AI legal information assistant. I am here to help "
-    "you navigate the legislation, codes, and tax regulations of the Republic of Armenia."
+    "Hello, I am Ardar, your AI legal information assistant. I am here to help "
+    "you navigate the legislation, codes, and tax regulations of the Republic of Armenia. "
+    "I reply in English or Russian."
 )
 
 # One-off instruction used by /help to have the bot describe what it does in
