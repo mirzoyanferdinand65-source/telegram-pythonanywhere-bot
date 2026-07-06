@@ -59,7 +59,7 @@ def test_handle_message_rate_limited():
         handle_message(make_message())
         mock_ask.assert_not_called()
         mock_bot.send_message.assert_called_once()
-        assert "favors" in mock_bot.send_message.call_args[0][1]
+        assert "daily" in mock_bot.send_message.call_args[0][1]
 
 
 def test_handle_message_sends_generic_error():
@@ -74,7 +74,7 @@ def test_handle_message_sends_generic_error():
 
         handle_message(make_message())
         error_msg = mock_bot.send_message.call_args[0][1]
-        assert "sideways" in error_msg
+        assert "exception occurred" in error_msg
         assert "API key" not in error_msg
 
 
@@ -149,7 +149,8 @@ def test_cmd_about_includes_commit_sha_when_set():
 
         cmd_about(make_message())
         sent = mock_bot.send_message.call_args[0][1]
-        assert "Version: abc1234" in sent
+        assert "Deployment SHA" in sent
+        assert "abc1234" in sent
 
 
 def test_cmd_about_omits_version_line_when_sha_unknown():
@@ -166,7 +167,7 @@ def test_cmd_about_omits_version_line_when_sha_unknown():
 
         cmd_about(make_message())
         sent = mock_bot.send_message.call_args[0][1]
-        assert "Version" not in sent
+        assert "Deployment SHA" not in sent
 
 
 def test_cmd_about_without_store():
@@ -183,7 +184,7 @@ def test_cmd_about_without_store():
 
         cmd_about(make_message())
         sent = mock_bot.send_message.call_args[0][1]
-        assert "stateless" in sent
+        assert "Stateless" in sent
 
 
 def test_cmd_about_intro_is_generated_live():
@@ -298,7 +299,9 @@ def test_cmd_sha_reports_live_commit_sha():
         from bot.handlers import cmd_sha
 
         cmd_sha(make_message())
-        mock_bot.send_message.assert_called_once_with(456, "Live SHA: abc1234")
+        mock_bot.send_message.assert_called_once_with(
+            456, "System Deployment SHA: `abc1234`", parse_mode="Markdown"
+        )
 
 
 def test_cmd_sha_reports_unknown_when_git_sha_unavailable():
@@ -309,7 +312,9 @@ def test_cmd_sha_reports_unknown_when_git_sha_unavailable():
         from bot.handlers import cmd_sha
 
         cmd_sha(make_message())
-        mock_bot.send_message.assert_called_once_with(456, "Live SHA: unknown")
+        mock_bot.send_message.assert_called_once_with(
+            456, "System Deployment SHA: `unknown`", parse_mode="Markdown"
+        )
 
 
 # ── /model command ────────────────────────────────────────────────────────────
@@ -343,7 +348,8 @@ def test_cmd_model_no_args_shows_current():
         msg = make_message(text="/model")
         cmd_model(msg)
         sent = mock_bot.send_message.call_args[0][1]
-        assert "Current provider: main" in sent
+        assert "processing engine" in sent
+        assert "main" in sent
         assert "/model main" in sent
         assert "/model hf" in sent
 
@@ -384,7 +390,7 @@ def test_cmd_model_invalid_choice():
         msg = make_message(text="/model bogus")
         cmd_model(msg)
         mock_set.assert_not_called()
-        assert "Invalid" in mock_bot.send_message.call_args[0][1]
+        assert "Selection error" in mock_bot.send_message.call_args[0][1]
 
 
 def test_cmd_model_redis_error_reports_failure():
@@ -395,7 +401,7 @@ def test_cmd_model_redis_error_reports_failure():
     ):
         msg = make_message(text="/model hf")
         cmd_model(msg)
-        assert "Could not save" in mock_bot.send_message.call_args[0][1]
+        assert "Could not modify" in mock_bot.send_message.call_args[0][1]
 
 
 def test_cmd_model_not_registered_without_hf_space_id():

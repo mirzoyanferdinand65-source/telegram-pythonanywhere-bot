@@ -110,16 +110,9 @@ def register_commands() -> str:
         BotCommand("reset", "Clear our conversation and start fresh"),
         BotCommand("about", "What powers me"),
         BotCommand("sha", "Show the running code version"),
-        BotCommand("joke", "Hear a fresh joke"),
-        BotCommand("quote", "Get a motivational quote"),
-        BotCommand("fact", "Learn a surprising fact"),
-        BotCommand("compliment", "Get a kind word"),
-        BotCommand("roast", "Get a playful roast of a name"),
         BotCommand("remember", "Save a note"),
         BotCommand("recall", "Show all your saved notes"),
         BotCommand("forget", "Delete all your saved notes"),
-        BotCommand("balance", "Check your coin balance"),
-        BotCommand("slots", "Play the slots (bet coins)"),
     ]
     if HF_SPACE_ID:
         commands.append(BotCommand("model", "Switch the AI engine I run on"))

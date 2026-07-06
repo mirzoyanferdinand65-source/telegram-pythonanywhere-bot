@@ -10,7 +10,6 @@ from bot.config import (
     SYSTEM_PROMPT,
 )
 from bot.ai import ask_ai
-from bot.casino import get_balance, spin_slots
 from bot.helpers import is_allowed, keep_typing, send_reply, should_respond
 from bot.history import clear_history
 from bot.notes import add_note, clear_notes, get_notes
@@ -227,45 +226,6 @@ if HF_SPACE_ID:
             bot.send_message(message.chat.id, "Switched to **Main Processing Engine**.", parse_mode="Markdown")
 
 
-# --- Fun one-shot AI commands (/joke, /quote, /fact, /compliment) ---
-#
-# These are all "one-shot" commands: a single AI generation with no memory.
-# They are intentionally DECOUPLED from the bot's main SYSTEM_PROMPT persona —
-# each carries its own neutral system prompt (NOT SYSTEM_PROMPT) and calls
-# generate() directly with a one-off message list, so their output never
-# touches the user's learning history and isn't steered toward word/dictionary
-# themes. Variety across repeated calls comes from the provider's own sampling.
-
-
-def _ai_oneshot(message, system_prompt: str, user_prompt: str, fallback: str) -> None:
-    """Run a single stateless AI generation and send the reply.
-
-    Shared body for /joke, /quote, /fact, /compliment. Handles the daily rate
-    limit, shows the typing indicator, and falls back to a static string on any
-    error or empty response so the command never breaks.
-    """
-    if is_rate_limited(message.from_user.id):
-        bot.send_message(
-            message.chat.id,
-            f"You have reached your daily limit of {RATE_LIMIT} queries. Please return tomorrow for further assistance.",
-        )
-        return
-    try:
-        with keep_typing(message.chat.id):
-            reply = generate(
-                message.from_user.id,
-                [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-            )
-        reply = (reply or "").strip() or fallback
-    except Exception as e:
-        print(f"Error in _ai_oneshot ({user_prompt!r}): {e}")
-        reply = fallback
-    bot.send_message(message.chat.id, reply)
-
-
 @bot.message_handler(commands=["remember"], func=is_allowed)
 def cmd_remember(message):
     parts = (message.text or "").split(maxsplit=1)
@@ -324,11 +284,6 @@ def cmd_forget(message):
         return
     clear_notes(message.from_user.id)
     bot.send_message(message.chat.id, f"🧹 Action completed. All {had} registered notebook entries have been permanently purged.")
-
-
-# --- Casino (virtual currency only — no real money involved anywhere) ---
-
-
 
 
 @bot.message_handler(content_types=["text"], func=is_allowed)
