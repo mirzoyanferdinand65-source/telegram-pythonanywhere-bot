@@ -82,7 +82,7 @@ WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").strip()
 # AI provider
 AI_API_KEY = os.environ["AI_API_KEY"].strip()
 AI_BASE_URL = os.environ.get("AI_BASE_URL", "https://api.cerebras.ai/v1").strip()
-MODEL = os.environ.get("AI_MODEL", "llama3.1-70b").strip()
+MODEL = os.environ.get("AI_MODEL", "gpt-oss-120b").strip()
 
 # Hugging Face provider (optional) — when set, users can switch via /model
 HF_SPACE_ID = os.environ.get("HF_SPACE_ID", "").strip()
