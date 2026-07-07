@@ -83,6 +83,17 @@ WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").strip()
 AI_API_KEY = os.environ["AI_API_KEY"].strip()
 AI_BASE_URL = os.environ.get("AI_BASE_URL", "https://api.cerebras.ai/v1").strip()
 MODEL = os.environ.get("AI_MODEL", "gpt-oss-120b").strip()
+# Cerebras has retired these ids; a request against them 404s and takes the
+# whole bot down. Fall back to the current verified free-tier model so a stale
+# .env value can't hard-brick the bot. Remove an id here if it's revived.
+_RETIRED_MODELS = {
+    "qwen-3-235b-a22b-instruct-2507",
+    "llama3.1-70b",
+    "llama3.1-8b",
+}
+if MODEL in _RETIRED_MODELS:
+    print(f"AI_MODEL '{MODEL}' is retired by the provider — falling back to gpt-oss-120b.")
+    MODEL = "gpt-oss-120b"
 
 # Hugging Face provider (optional) — when set, users can switch via /model
 HF_SPACE_ID = os.environ.get("HF_SPACE_ID", "").strip()
