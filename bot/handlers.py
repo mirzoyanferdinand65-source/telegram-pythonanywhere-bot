@@ -458,8 +458,6 @@ def handle_message(message):
         _log(message, "out", reply)
     except Exception as e:
         print(f"Error in handle_message: {e}")
-        # TEMPORARY DEBUG: surface the real exception in the reply so we can
-        # diagnose without PA console access. Revert after diagnosis.
-        error_msg = f"⚠️ DEBUG — {type(e).__name__}: {e}"
+        error_msg = "⚠️ An infrastructure or processing exception occurred on the legal server network. Please resubmit your query shortly."
         bot.send_message(message.chat.id, error_msg)
         _log(message, "out", f"[error] {e}")
