@@ -23,9 +23,10 @@ telegram-pythonanywhere-bot/
 │   ├── config.py         # All env vars and constants (edit this to configure the bot)
 │   ├── clients.py        # Instantiates bot, ai, store (do not edit unless adding a client)
 │   ├── store.py          # SqliteStore — KV with lazy TTL expiry, backed by sqlite3
-│   ├── ai.py             # ask_ai() — history + dispatch to providers
+│   ├── ai.py             # ask_ai() — study-mode vs free-chat dispatch, history, grounding
 │   ├── providers.py      # Provider dispatch: OpenAI-compatible (with retry) or HF Gradio space
-│   ├── knowledge.py      # RAG knowledge base — PDF ingest + SQLite FTS5 retrieval + citations
+│   ├── knowledge.py      # RAG knowledge base — PDF ingest + SQLite FTS5 retrieval (doc-scoped) + citations
+│   ├── active_doc.py     # Per-user "document being studied" selection stored via store
 │   ├── preferences.py    # Per-user provider preference stored via store
 │   ├── history.py        # get/save/clear conversation history via store (graceful degradation)
 │   ├── rate_limit.py     # Per-user daily message rate limiting via store (graceful degradation)
@@ -34,7 +35,8 @@ telegram-pythonanywhere-bot/
 │   └── handlers.py       # All Telegram command and message handlers — add new commands here
 ├── tests/
 │   ├── conftest.py       # Mocks env vars and external packages (telebot, openai, flask)
-│   ├── test_ai.py        # ask_ai() orchestration
+│   ├── test_ai.py        # ask_ai() orchestration — study vs free-chat dispatch
+│   ├── test_active_doc.py # Per-user studied-document selection state
 │   ├── test_providers.py # _call_main() retry, _call_hf() prompt handling, generate() dispatch
 │   ├── test_preferences.py
 │   ├── test_handlers.py
@@ -67,7 +69,7 @@ telegram-pythonanywhere-bot/
 3. `api/index.py` validates the `X-Telegram-Bot-Api-Secret-Token` header (if `WEBHOOK_SECRET` is set), then deserializes the update and passes it to pyTelegramBotAPI
 4. pyTelegramBotAPI routes to the correct handler in `bot/handlers.py`
 5. For text messages: checks `should_respond()` → checks rate limit → enters `keep_typing()` context manager (a background thread re-sends the Telegram "typing" action every 4s so the indicator stays alive during slow generations) → calls `ask_ai()` → exits context (stops thread) → sends reply
-6. `ask_ai()` loads history via the store, prepends the system prompt, dispatches to `generate()` in `bot/providers.py` which calls `_call_main()` (with retry logic) or `_call_hf()` depending on the user's provider preference, then saves updated history
+6. `ask_ai()` loads history via the store, then branches on **mode** (see "Two modes" below): in **study mode** it scopes retrieval to the one selected document and injects its excerpts; in **free chat** it adds a general-jurisprudence instruction and does NO retrieval. It prepends the system prompt, dispatches to `generate()` in `bot/providers.py` which calls `_call_main()` (with retry logic) or `_call_hf()` depending on the user's provider preference, then saves updated history
 
 **Critical:** `telebot.TeleBot` must be created with `threaded=False`. Without this, handlers run in threads that can be killed unexpectedly. `threaded=False` is also fine for local polling (`run_local.py`) — updates just process sequentially in the main thread.
 
@@ -91,7 +93,8 @@ telegram-pythonanywhere-bot/
 | `RATE_LIMIT` | No | `250` | Max messages per user per day |
 | `ALLOWED_USERS` | No | _open_ | Comma-separated whitelist of usernames (with/without `@`) or numeric user IDs. Empty = everyone allowed. Non-empty = silent drop for non-whitelisted (no rejection reply, no leak of bot existence). Implemented as `func=is_allowed` on every `@bot.message_handler` so telebot never dispatches the handler |
 | `ADMIN_USERS` | No | _empty_ | Comma-separated usernames / numeric IDs allowed to UPLOAD documents to the knowledge base (`bot/knowledge.py`). **Fail-closed:** empty = nobody can upload. Checked by `helpers.is_admin`. Users find their numeric ID via `/myid` |
-| `KB_TOP_K` | No | `4` | Number of text chunks retrieved from the knowledge base per user question |
+| `KB_TOP_K` | No | `8` | Number of text chunks retrieved from the knowledge base per user question (study mode) |
+| `KB_MAX_CONTEXT_CHARS` | No | `8000` | Cap on retrieved text injected into the prompt. Kept modest for the Cerebras free-tier 8,192-token context ceiling |
 | `HOSTING_LABEL` | No | `PythonAnywhere` | Label shown by the `/about` command |
 | `DEPLOY_SECRET` | No | — | Enables `/api/deploy` auto-deploy webhook. Fail-closed: when unset, the endpoint returns 403. Generate with `openssl rand -hex 32` and set the same value as a GitHub repo secret named `DEPLOY_SECRET` so the workflow at `.github/workflows/deploy.yml` can call the endpoint |
 | `PA_WSGI_PATH` | No | _auto-detected_ | Absolute path of the PA WSGI file `/api/deploy` touches to reload the worker. Only needed when auto-detection fails (non-default PA layout / custom domain) — the deploy response says so explicitly when that happens |
@@ -108,14 +111,15 @@ The bot uses the OpenAI Python SDK pointed at any OpenAI-compatible endpoint. Sw
 
 | Provider | Base URL | Notes |
 |---|---|---|
-| Cerebras | `https://api.cerebras.ai/v1` | Default. Confirmed working on free tier: `gpt-oss-120b`, `qwen-3-235b-a22b-instruct-2507` |
-| Groq | `https://api.groq.com/openai/v1` | 14,400 req/day free. Model: `llama-3.1-8b-instant` |
-| Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai/` | Model: `gemini-2.5-flash` (250 req/day) |
+| Cerebras | `https://api.cerebras.ai/v1` | Default. Working on free tier: `gpt-oss-120b` (production), `zai-glm-4.7` / `gemma-4-31b` (preview). Only `api.cerebras.ai` is PA-whitelisted, so the rows below are NOT reachable from PA free tier without a whitelist request. |
+| Groq | `https://api.groq.com/openai/v1` | 14,400 req/day free. Model: `llama-3.1-8b-instant`. **Not PA-whitelisted.** |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai/` | Model: `gemini-2.5-flash` (250 req/day). **Not PA-whitelisted.** |
 
-**Cerebras model IDs** (exact strings — wrong format causes 404):
-- `gpt-oss-120b` ✓ verified working on free tier. Current default (`bot/config.py`, `.env.example`) — strong reasoning at Cerebras speed
-- `qwen-3-235b-a22b-instruct-2507` ✓ verified working on free tier. Strong reasoning and multilingual, but slower per-token and more queue-pressured
-- `llama3.1-8b` ✗ deprecated by Cerebras — do not use (was the previous default)
+**Cerebras model IDs** (exact strings — wrong format causes 404; verify current list at https://inference-docs.cerebras.ai/models/overview):
+- `gpt-oss-120b` ✓ production, verified working. Current default (`bot/config.py`, `.env.example`) — strong reasoning at Cerebras speed, but weaker at low-resource Armenian.
+- `zai-glm-4.7` — preview (355B). Largest free-tier option → best current bet for Armenian quality; try it via `AI_MODEL` and fall back to `gpt-oss-120b` if it 404s.
+- `qwen-3-235b-a22b-instruct-2507` ✗ **retired on 2026-07-07** (started 404ing) — listed in `_RETIRED_MODELS` in `bot/config.py`, which auto-falls-back to `gpt-oss-120b`. The live `.env` still names it, so the bot actually runs gpt-oss-120b.
+- `llama3.1-8b`, `llama3.1-70b` ✗ deprecated/retired — do not use.
 
 ---
 
@@ -178,17 +182,22 @@ The bot's storage layer is a thin KV-with-TTL abstraction in `bot/store.py` expo
 
 `bot/knowledge.py` lets the bot answer grounded in the *actual text* of uploaded legal documents (RA codes, the Constitution, etc.) instead of the model's memory — which both improves accuracy and lets every answer **cite its source**.
 
+**Two modes (added 2026-07-10).** The bot no longer auto-retrieves across all documents on every message (that caused cross-document keyword bleed — a criminal-law question pulling civil-code chunks). Instead `bot/ai.py::ask_ai` branches on the user's selection, stored per-user in `bot/active_doc.py` (`active_doc:{user_id}` in the KV store, no TTL):
+- **Study mode** — user tapped **📖 Study this** on a document in `/documents` (callback `kbuse:<id>`). Retrieval is scoped to that one `doc_id`; "main idea / summarize / о чём / ինչի մասին" questions (detected by `ai._wants_overview`) use `knowledge.overview_chunks(doc_id)` (the document's opening sections) instead of keyword hits. Reply carries a `📖 Studying: <title>` footer. `/done` clears the selection; `/current` reports it.
+- **Free chat (default)** — no document selected → general jurisprudence conversation from the model's own knowledge, **no retrieval, no citation footer**. The system prompt tells the model not to fabricate article numbers and to suggest `/documents` for exact answers.
+- Stateless mode (no `SQLITE_PATH`) has no persistence, so every user is always in free chat.
+
 **Why SQLite FTS5 and not embeddings.** PA's free tier can't reach a non-whitelisted embeddings API and can't fit torch/sentence-transformers. So retrieval uses **SQLite FTS5** (full-text search, compiled into stdlib `sqlite3`): pure local keyword/BM25 ranking, zero extra deps, zero extra network calls. The `unicode61` tokenizer case-folds and splits Armenian, Russian, and Latin alike, so a question in any of the three retrieves the right articles. The only added dependency is `pypdf` (pure-Python text extraction).
 
 **Enabled only when `SQLITE_PATH` is set AND the sqlite build has FTS5.** `knowledge._init()` probes FTS5 at import; on any failure the module disables itself and every function returns a safe default (`retrieve → []`, `ingest → {"ok": False}`), so the bot keeps working as a plain chat bot.
 
 **Flow:**
 - **Ingest** (admin only): admin sends a PDF → `handle_document` gates on `is_admin`, downloads via `bot.get_file`/`download_file` (Telegram's 20 MB `getFile` cap → `KB_MAX_UPLOAD_BYTES`), then `knowledge.ingest()` extracts text with pypdf, splits it into overlapping ~1200-char chunks, and indexes them in the `kb_chunks` FTS5 table. Metadata (title, upload date, Telegram `file_id`, uploader) goes in `kb_documents`. Re-uploading the same title **replaces** the prior version. An empty extraction ⇒ "looks like scanned images" error (no OCR on free tier).
-- **Answer**: `ai.ask_ai()` calls `knowledge.retrieve(question)` (FTS5 `MATCH` with each term quoted+OR-ed, ordered by `bm25()`), injects the top-K excerpts into the system prompt, and appends a footer: `📄 Based on: <title> (uploaded dd.mm.yy)`. If documents exist but none match, it notes the answer isn't document-backed; if no documents are loaded at all, no footer (reads naturally).
-- **Download**: `/documents` lists all files with inline buttons; the `kbdl:<id>` callback re-sends the stored `file_id` — so the PDF is served from Telegram's servers, never kept on PA's disk.
+- **Answer** (study mode only — free chat does not retrieve): `ai.ask_ai()` calls `knowledge.retrieve(question, doc_id=<selected>)`. Retrieval is **two-pass**: (1) any article number the user cited — `Article 258` / `Հոդված 104` / `Статья 42` incl. declensions, parsed by `_article_numbers` — is looked up directly and pinned to the top; (2) normal quoted+OR-ed BM25 keyword matches fill the rest, deduped by rowid. The excerpts go into the system prompt under a study instruction and the reply carries a `📖 Studying: <title>` footer.
+- **Download**: `/documents` lists all files; each row has a **📖 Study** button (`kbuse:<id>`) and a **⬇** download button (`kbdl:<id>`). The download callback re-sends the stored `file_id` — the PDF is served from Telegram's servers, never kept on PA's disk.
 - **Manage**: `/deldoc <id>` (admin) removes a document + its chunks. `/myid` reports the caller's numeric ID for `ADMIN_USERS`.
 
-**Gotchas:** FTS5 `MATCH` input must be sanitized — `_fts_query` tokenizes to `\w+`, drops 1-char noise (keeps digits so "Article 258" matches), quotes each term, and OR-joins them; never pass raw user text to `MATCH`. Files over 20 MB can't be ingested via Telegram — split them or ingest offline. Scanned/image PDFs need OCR, which the free tier can't run.
+**Gotchas:** FTS5 `MATCH` input must be sanitized — `_fts_query` tokenizes to `\w+`, drops 1-char noise (keeps digits so "Article 258" matches), quotes each term, and OR-joins them; never pass raw user text to `MATCH`. Files over 20 MB can't be ingested via Telegram — split them or ingest offline. Scanned/image PDFs need OCR, which the free tier can't run. **Free-tier context is 8,192 tokens total** and Armenian is token-dense, so `KB_MAX_CONTEXT_CHARS` (default 8000) and `KB_TOP_K` (default 8) are deliberately conservative — raising them risks overflowing the window on the free tier.
 
 ## Reliability
 
