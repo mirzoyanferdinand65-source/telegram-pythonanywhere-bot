@@ -131,10 +131,14 @@ SYSTEM_PROMPT = (
     "Code and Article (e.g., 'According to Article 258 of the RA Tax Code...'). If you lack the exact data, "
     "tell the user honestly to consult the State Revenue Committee (SRC), the RA Ministry of Justice, or a "
     "licensed lawyer. Translate complex legal jargon into simple, crystal-clear everyday language. "
-    "IMPORTANT — language rule: reply in the SAME language the user writes in. If the user writes in Armenian, "
-    "answer in clear, correct, natural Armenian (Eastern Armenian). If they write in Russian, answer in Russian; "
-    "if in English, answer in English. Keep official proper names (codes, institutions) in their original form. "
-    "Write article citations naturally in the reply language. "
+    "IMPORTANT — language rule: reply in the SAME language the user writes in. If they write in Russian, answer "
+    "in Russian; if in English, answer in English. Keep official proper names (codes, institutions) in their "
+    "original form. Write article citations naturally in the reply language. "
+    "ARMENIAN QUALITY — when the user writes in Armenian you MUST answer in fluent, grammatically correct Eastern "
+    "Armenian (Հայաստանի Հանրապետության պաշտոնական լեզու): correct spelling and case declensions, natural legal "
+    "register, and the EXACT Armenian legal terms as they appear in the official excerpts below — do not invent, "
+    "transliterate, or calque terms from Russian or English, and do not mix scripts. If unsure of the precise "
+    "Armenian legal term, quote it verbatim from the excerpts. Prefer the wording of the law itself. "
     "BREVITY — this is a chat bot, not an essay: keep every reply SHORT and CONCRETE. Answer the exact "
     "question asked and nothing more. Lead with the direct answer in the first sentence, then at most a "
     "few tight supporting lines. Prefer short bullet points over paragraphs. No preamble, no restating the "
@@ -172,10 +176,16 @@ ADMIN_USERS = [
 
 # Knowledge base (RAG) tuning. Retrieval is SQLite FTS5 — no embeddings,
 # no extra network calls (works within PA's outbound whitelist).
-KB_TOP_K = int(os.environ.get("KB_TOP_K", "4"))  # chunks retrieved per query
+KB_TOP_K = int(os.environ.get("KB_TOP_K", "8"))  # chunks retrieved per query
 KB_CHUNK_SIZE = 1200  # target characters per indexed chunk
 KB_CHUNK_OVERLAP = 150  # characters of overlap between adjacent chunks
-KB_MAX_CONTEXT_CHARS = 6000  # cap on retrieved text injected into the prompt
+# Cap on retrieved text injected into the prompt. Cerebras' FREE TIER limits
+# the whole context window to 8,192 tokens (prompt + reply), and Armenian
+# script is token-dense (~2 chars/token), so this can't grow much: ~8k chars
+# leaves room for the system prompt, recent history, and the generated answer.
+# The article-pinning in knowledge.retrieve() does the relevance work instead
+# of raw volume. Raise this only if you move to a larger-context provider.
+KB_MAX_CONTEXT_CHARS = int(os.environ.get("KB_MAX_CONTEXT_CHARS", "8000"))
 KB_MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # Telegram Bot API getFile limit (20 MB)
 
 MAX_MSG_LEN = 4096  # Telegram's character limit per message

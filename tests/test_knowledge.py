@@ -95,6 +95,33 @@ def test_ingest_and_retrieve_grounds_on_text(kb, monkeypatch):
     assert "Article 258" in context
 
 
+def test_article_numbers_parses_three_languages():
+    from bot import knowledge
+
+    assert knowledge._article_numbers("what does Article 258 say") == ["258"]
+    assert knowledge._article_numbers("Հոդված 104-ի մասին") == ["104"]
+    assert knowledge._article_numbers("расскажи про статью 42") == ["42"]
+    # De-duplicates and preserves order.
+    assert knowledge._article_numbers("art. 5 and Article 5") == ["5"]
+    assert knowledge._article_numbers("no numbers here") == []
+
+
+def test_retrieve_pins_cited_article_first(kb, monkeypatch):
+    # Two articles: the keyword "penalty" appears in BOTH, so plain BM25 could
+    # rank either first. Citing Article 300 must pin its chunk to the top.
+    text = (
+        "Article 100. General penalty provisions apply to minor offences.\n\n"
+        + ("filler sentence about penalty and procedure. " * 40)
+        + "\n\nArticle 300. The penalty for aggravated fraud is up to ten years."
+    )
+    monkeypatch.setattr(kb, "extract_pdf_text", lambda b: text)
+    kb.ingest(b"x", title="Criminal Code", upload_date="01.01.25")
+
+    hits = kb.retrieve("what is the penalty under Article 300")
+    assert hits
+    assert "Article 300" in hits[0]["body"]
+
+
 def test_retrieve_matches_cyrillic(kb, monkeypatch):
     monkeypatch.setattr(kb, "extract_pdf_text", lambda b: "Статья 42. Налог на прибыль 18 процентов.")
     kb.ingest(b"x", title="Civil Code")

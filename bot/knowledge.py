@@ -227,29 +227,79 @@ def _fts_query(text: str, max_terms: int = 24) -> str:
     return " OR ".join(f'"{t}"' for t in tokens)
 
 
+# Article references a user might type, across the three languages the codes
+# use: "Article 258", "art. 12", "Հոդված 104", "hodvats 15", "Статья 42",
+# "ст. 7", or a bare "№ 258". Captures the number so we can pin the exact
+# article's chunk to the top of the results.
+# Word stems (``\w*`` tails) absorb the case endings each language adds:
+# Armenian հոդված→հոդվածի/ը/ում, Russian стать→статья/статьи/статью/статей.
+_ARTICLE_RE = re.compile(
+    r"(?:articles?|art\.?|հոդված\w*|hodvats?\w*|стать\w*|ст\.?|№)\s*№?\s*(\d{1,4})",
+    re.IGNORECASE | re.UNICODE,
+)
+
+
+def _article_numbers(text: str) -> list[str]:
+    """Extract article numbers a user referenced, in order, de-duplicated."""
+    seen, out = set(), []
+    for num in _ARTICLE_RE.findall(text or ""):
+        if num not in seen:
+            seen.add(num)
+            out.append(num)
+    return out
+
+
+def _run_match(match: str, limit: int) -> list:
+    """Execute one FTS5 MATCH and return raw rows (rowid + fields)."""
+    return _conn.execute(
+        "SELECT kb_chunks.rowid, kb_chunks.doc_id, kb_chunks.title, kb_chunks.body, "
+        "kb_documents.upload_date "
+        "FROM kb_chunks JOIN kb_documents ON kb_documents.doc_id = kb_chunks.doc_id "
+        "WHERE kb_chunks MATCH ? ORDER BY bm25(kb_chunks) LIMIT ?",
+        (match, limit),
+    ).fetchall()
+
+
 def retrieve(query: str, k: int = KB_TOP_K) -> list[dict]:
     """Return up to ``k`` most relevant chunks for ``query``, best first.
 
-    Each item: ``{"doc_id", "title", "upload_date", "body"}``. Empty list
-    when disabled, when the query has no usable terms, or on any error."""
+    Two-pass for legal codes: any article number the user cited (e.g.
+    "Article 258", "Հոդված 104", "Статья 42") is looked up directly and its
+    chunk pinned to the front, then the rest is filled with normal keyword
+    (BM25) matches. Each item: ``{"doc_id", "title", "upload_date", "body"}``.
+    Empty list when disabled, when the query has no usable terms, or on error."""
     if not _ENABLED:
         return []
     match = _fts_query(query)
     if not match:
         return []
+    seen_rowids: set = set()
+    picked: list = []
+
     try:
-        rows = _conn.execute(
-            "SELECT kb_chunks.doc_id, kb_chunks.title, kb_chunks.body, kb_documents.upload_date "
-            "FROM kb_chunks JOIN kb_documents ON kb_documents.doc_id = kb_chunks.doc_id "
-            "WHERE kb_chunks MATCH ? ORDER BY bm25(kb_chunks) LIMIT ?",
-            (match, k),
-        ).fetchall()
+        # Pass 1 — exact article lookups, pinned to the top. Matching the bare
+        # number leans on BM25 to surface the chunk where it's most salient
+        # (the article heading) rather than an incidental mention.
+        for num in _article_numbers(query):
+            for r in _run_match(f'"{num}"', 3):
+                if r[0] not in seen_rowids:
+                    seen_rowids.add(r[0])
+                    picked.append(r)
+
+        # Pass 2 — normal keyword recall, fills the remaining budget.
+        for r in _run_match(match, k):
+            if len(picked) >= k:
+                break
+            if r[0] not in seen_rowids:
+                seen_rowids.add(r[0])
+                picked.append(r)
     except Exception as e:
         print(f"Knowledge retrieve error: {e}")
         return []
+
     return [
-        {"doc_id": r[0], "title": r[1], "body": r[2], "upload_date": r[3]}
-        for r in rows
+        {"doc_id": r[1], "title": r[2], "body": r[3], "upload_date": r[4]}
+        for r in picked[:k]
     ]
 
 
