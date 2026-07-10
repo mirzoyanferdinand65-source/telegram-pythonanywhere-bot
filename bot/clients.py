@@ -107,13 +107,15 @@ def register_commands() -> str:
     commands = [
         BotCommand("start", "Meet Ardar, your RA legal assistant"),
         BotCommand("help", "Show help and available commands"),
+        BotCommand("documents", "Browse documents — study 📖 or download ⬇"),
+        BotCommand("current", "Show which document you're studying"),
+        BotCommand("done", "Leave study mode and chat generally"),
         BotCommand("reset", "Clear the consultation history"),
         BotCommand("about", "Technical specifications and framework"),
         BotCommand("sha", "Show the live deployment version"),
         BotCommand("remember", "Save a legal note or reminder"),
         BotCommand("recall", "Show your saved legal notes"),
         BotCommand("forget", "Delete your saved legal notes"),
-        BotCommand("documents", "Browse and download legal documents"),
     ]
     if HF_SPACE_ID:
         commands.append(BotCommand("model", "Switch the processing engine"))
