@@ -249,21 +249,31 @@ def _article_numbers(text: str) -> list[str]:
     return out
 
 
-def _run_match(match: str, limit: int) -> list:
-    """Execute one FTS5 MATCH and return raw rows (rowid + fields)."""
-    return _conn.execute(
+def _run_match(match: str, limit: int, doc_id: int | None = None) -> list:
+    """Execute one FTS5 MATCH and return raw rows (rowid + fields).
+
+    When ``doc_id`` is given, results are restricted to that single document
+    (study mode) so answers can't leak in from other codes."""
+    sql = (
         "SELECT kb_chunks.rowid, kb_chunks.doc_id, kb_chunks.title, kb_chunks.body, "
         "kb_documents.upload_date "
         "FROM kb_chunks JOIN kb_documents ON kb_documents.doc_id = kb_chunks.doc_id "
-        "WHERE kb_chunks MATCH ? ORDER BY bm25(kb_chunks) LIMIT ?",
-        (match, limit),
-    ).fetchall()
+        "WHERE kb_chunks MATCH ?"
+    )
+    params: tuple = (match,)
+    if doc_id is not None:
+        sql += " AND kb_chunks.doc_id = ?"
+        params += (doc_id,)
+    sql += " ORDER BY bm25(kb_chunks) LIMIT ?"
+    params += (limit,)
+    return _conn.execute(sql, params).fetchall()
 
 
-def retrieve(query: str, k: int = KB_TOP_K) -> list[dict]:
+def retrieve(query: str, k: int = KB_TOP_K, doc_id: int | None = None) -> list[dict]:
     """Return up to ``k`` most relevant chunks for ``query``, best first.
 
-    Two-pass for legal codes: any article number the user cited (e.g.
+    When ``doc_id`` is set, retrieval is scoped to that one document (study
+    mode). Two-pass for legal codes: any article number the user cited (e.g.
     "Article 258", "Հոդված 104", "Статья 42") is looked up directly and its
     chunk pinned to the front, then the rest is filled with normal keyword
     (BM25) matches. Each item: ``{"doc_id", "title", "upload_date", "body"}``.
@@ -281,13 +291,13 @@ def retrieve(query: str, k: int = KB_TOP_K) -> list[dict]:
         # number leans on BM25 to surface the chunk where it's most salient
         # (the article heading) rather than an incidental mention.
         for num in _article_numbers(query):
-            for r in _run_match(f'"{num}"', 3):
+            for r in _run_match(f'"{num}"', 3, doc_id):
                 if r[0] not in seen_rowids:
                     seen_rowids.add(r[0])
                     picked.append(r)
 
         # Pass 2 — normal keyword recall, fills the remaining budget.
-        for r in _run_match(match, k):
+        for r in _run_match(match, k, doc_id):
             if len(picked) >= k:
                 break
             if r[0] not in seen_rowids:
@@ -300,6 +310,31 @@ def retrieve(query: str, k: int = KB_TOP_K) -> list[dict]:
     return [
         {"doc_id": r[1], "title": r[2], "body": r[3], "upload_date": r[4]}
         for r in picked[:k]
+    ]
+
+
+def overview_chunks(doc_id: int, n: int = 6) -> list[dict]:
+    """Return the first ``n`` chunks of a document in reading order.
+
+    Used for "what is this document about / main idea / summarize" questions:
+    a legal code states its scope and general provisions up front, so the
+    opening chunks are the closest thing to a summary we can retrieve without
+    embeddings. Same item shape as ``retrieve``. Empty on disabled/error."""
+    if not _ENABLED:
+        return []
+    try:
+        rows = _conn.execute(
+            "SELECT kb_chunks.doc_id, kb_chunks.title, kb_chunks.body, kb_documents.upload_date "
+            "FROM kb_chunks JOIN kb_documents ON kb_documents.doc_id = kb_chunks.doc_id "
+            "WHERE kb_chunks.doc_id = ? ORDER BY kb_chunks.rowid LIMIT ?",
+            (doc_id, n),
+        ).fetchall()
+    except Exception as e:
+        print(f"Knowledge overview error: {e}")
+        return []
+    return [
+        {"doc_id": r[0], "title": r[1], "body": r[2], "upload_date": r[3]}
+        for r in rows
     ]
 
 

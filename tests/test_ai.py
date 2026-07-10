@@ -6,6 +6,7 @@ def test_ask_ai_returns_reply():
         patch("bot.ai.generate", return_value="Hello there!"),
         patch("bot.ai.get_history", return_value=[]),
         patch("bot.ai.save_history"),
+        patch("bot.ai.get_active_doc", return_value=None),
     ):
         from bot.ai import ask_ai
 
@@ -18,6 +19,7 @@ def test_ask_ai_saves_history():
         patch("bot.ai.generate", return_value="reply"),
         patch("bot.ai.get_history", return_value=[]),
         patch("bot.ai.save_history") as mock_save,
+        patch("bot.ai.get_active_doc", return_value=None),
     ):
         from bot.ai import ask_ai
 
@@ -33,6 +35,7 @@ def test_ask_ai_passes_user_id_to_generate():
         patch("bot.ai.generate", return_value="hi") as mock_gen,
         patch("bot.ai.get_history", return_value=[]),
         patch("bot.ai.save_history"),
+        patch("bot.ai.get_active_doc", return_value=None),
     ):
         from bot.ai import ask_ai
 
@@ -40,52 +43,72 @@ def test_ask_ai_passes_user_id_to_generate():
         assert mock_gen.call_args[0][0] == 456
 
 
-def test_ask_ai_injects_context_and_appends_citation():
-    """When the KB returns hits, the excerpts are injected into the system
-    prompt and a 'Based on' footer is appended to the reply."""
+def test_free_chat_is_not_grounded_and_never_retrieves():
+    """With no document selected the bot free-chats: no document retrieval,
+    no citation footer."""
     with (
-        patch("bot.ai.generate", return_value="Per Article 258, the deadline is April 20.") as mock_gen,
+        patch("bot.ai.generate", return_value="Generally, contracts require consent.") as mock_gen,
         patch("bot.ai.get_history", return_value=[]),
         patch("bot.ai.save_history"),
+        patch("bot.ai.get_active_doc", return_value=None),
+        patch("bot.ai.knowledge.retrieve") as mock_retrieve,
+    ):
+        from bot.ai import ask_ai
+
+        reply = ask_ai(1, "how do contracts work?")
+        assert reply == "Generally, contracts require consent."
+        mock_retrieve.assert_not_called()  # free chat must not retrieve
+        system_msg = mock_gen.call_args[0][1][0]
+        assert "FREE CHAT" not in system_msg["content"] or "no specific" in system_msg["content"]
+        assert "no specific" in system_msg["content"]  # free-chat instruction present
+
+
+def test_study_mode_scopes_to_selected_document_and_footers():
+    """In study mode retrieval is scoped to the active doc, excerpts are
+    injected, and the reply is tagged with the studied document."""
+    doc = {"doc_id": 7, "title": "RA Criminal Code", "upload_date": "01.01.25", "file_id": "F"}
+    with (
+        patch("bot.ai.generate", return_value="Article 258 covers fraud.") as mock_gen,
+        patch("bot.ai.get_history", return_value=[]),
+        patch("bot.ai.save_history"),
+        patch("bot.ai.get_active_doc", return_value=7),
+        patch("bot.ai.knowledge.get_document", return_value=doc),
         patch(
             "bot.ai.knowledge.retrieve",
-            return_value=[{"doc_id": 1, "title": "RA Tax Code", "upload_date": "12.05.24", "body": "Article 258..."}],
-        ),
+            return_value=[{"doc_id": 7, "title": "RA Criminal Code", "upload_date": "01.01.25", "body": "Article 258 fraud."}],
+        ) as mock_retrieve,
     ):
         from bot.ai import ask_ai
 
-        reply = ask_ai(1, "tax deadline?")
-        # Footer names the source document and its upload date.
-        assert "📄" in reply and "RA Tax Code" in reply and "12.05.24" in reply
-        # The retrieved excerpt was injected into the system prompt.
+        reply = ask_ai(1, "what does article 258 say?")
+        # Retrieval was scoped to the selected document.
+        assert mock_retrieve.call_args.kwargs.get("doc_id") == 7
+        # Footer names the document being studied.
+        assert "📖" in reply and "RA Criminal Code" in reply and "/done" in reply
+        # Excerpt injected under the study instruction.
         system_msg = mock_gen.call_args[0][1][0]
-        assert system_msg["role"] == "system"
-        assert "OFFICIAL EXCERPTS" in system_msg["content"]
-        assert "Article 258" in system_msg["content"]
+        assert "DOCUMENT EXCERPTS" in system_msg["content"]
+        assert "Article 258 fraud." in system_msg["content"]
 
 
-def test_ask_ai_notes_when_documents_exist_but_none_match():
+def test_study_mode_overview_uses_document_opening():
+    """A 'main idea' question pulls the document's opening chunks rather than
+    keyword hits."""
+    doc = {"doc_id": 3, "title": "Constitution", "upload_date": "02.02.25"}
     with (
-        patch("bot.ai.generate", return_value="General answer."),
+        patch("bot.ai.generate", return_value="This document establishes..."),
         patch("bot.ai.get_history", return_value=[]),
         patch("bot.ai.save_history"),
-        patch("bot.ai.knowledge.retrieve", return_value=[]),
-        patch("bot.ai.knowledge.has_documents", return_value=True),
+        patch("bot.ai.get_active_doc", return_value=3),
+        patch("bot.ai.knowledge.get_document", return_value=doc),
+        patch("bot.ai.knowledge.retrieve") as mock_retrieve,
+        patch(
+            "bot.ai.knowledge.overview_chunks",
+            return_value=[{"doc_id": 3, "title": "Constitution", "upload_date": "02.02.25", "body": "Preamble..."}],
+        ) as mock_overview,
     ):
         from bot.ai import ask_ai
 
-        reply = ask_ai(1, "unrelated question")
-        assert "Not based on a specific uploaded document" in reply
-
-
-def test_ask_ai_no_footer_when_kb_empty():
-    with (
-        patch("bot.ai.generate", return_value="Plain reply."),
-        patch("bot.ai.get_history", return_value=[]),
-        patch("bot.ai.save_history"),
-        patch("bot.ai.knowledge.retrieve", return_value=[]),
-        patch("bot.ai.knowledge.has_documents", return_value=False),
-    ):
-        from bot.ai import ask_ai
-
-        assert ask_ai(1, "hi") == "Plain reply."
+        ask_ai(1, "what is the main idea of this document?")
+        mock_overview.assert_called_once()
+        mock_retrieve.assert_not_called()  # overview path skips keyword retrieval

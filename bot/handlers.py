@@ -12,6 +12,7 @@ from bot.config import (
     SYSTEM_PROMPT,
 )
 from bot import knowledge
+from bot.active_doc import clear_active_doc, get_active_doc, set_active_doc
 from bot.ai import ask_ai
 from bot.helpers import is_admin, is_allowed, keep_typing, send_reply, should_respond
 from bot.history import clear_history
@@ -117,10 +118,13 @@ def cmd_start(message):
         "My purpose is to make the jurisprudence system of the Republic of Armenia "
         "accessible, clear, and transparent for every citizen.\n"
         "\n"
-        "You can ask me questions about the **RA Constitution, Tax Code, Civil Code, "
-        "Criminal Code, Labor Code**, or specific legal scenarios (e.g., tax deadlines for Sole Proprietors/IE).\n"
+        "There are **two ways** to use me:\n"
+        "💬 *General chat* — just ask any question about the RA Constitution, Tax, Civil, "
+        "Criminal, or Labor codes and jurisprudence.\n"
+        "📖 *Study a document* — send /documents, tap **📖 Study** on one, and I'll answer "
+        "only from that document and cite its articles. Send /done to go back to general chat.\n"
         "\n"
-        "👉 Please enter your question directly, or type /help to review available commands."
+        "👉 Ask your question directly, or type /help to see all commands."
     )
     bot.send_message(message.chat.id, text, parse_mode="Markdown")
 
@@ -145,7 +149,14 @@ def cmd_help(message):
         "/remember <note> — Store a custom legal reminder or bookmark",
         "/recall — View your saved reminders and bookmarks",
         "/forget — Clear your saved reminders layout",
-        "/documents — Browse and download the official legal documents",
+        "/documents — Browse documents; tap 📖 to study one, ⬇ to download",
+        "/current — Show which document you're studying",
+        "/done — Leave study mode and chat generally",
+        "",
+        "💬 *Two ways to use me:*",
+        "• *General chat* — just ask any legal / jurisprudence question.",
+        "• *Study a document* — /documents → 📖 Study, then ask about that document "
+        "(I answer only from it and cite its articles).",
     ]
     if HF_SPACE_ID:
         lines.append("/model — Toggle the backend processing model")
@@ -366,29 +377,103 @@ def handle_document(message):
 
 @bot.message_handler(commands=["documents"], func=is_allowed)
 def cmd_documents(message):
-    """List available documents with inline download buttons for any user."""
+    """List documents. Each has a "Study this" button (grounds answers in that
+    one document) and, when available, a download button."""
     docs = knowledge.list_documents()
     if not docs:
         bot.send_message(
             message.chat.id,
             "📚 No documents have been uploaded yet. The administrator can add legal "
-            "codes and the Constitution, and they'll show up here for download.",
+            "codes and the Constitution, and they'll show up here to study or download.",
         )
         return
+    active_id = get_active_doc(message.from_user.id)
     markup = types.InlineKeyboardMarkup()
-    lines = ["📚 *Available legal documents:*", ""]
+    lines = ["📚 *Available documents* — tap 📖 to study one, ⬇ to download:", ""]
     for d in docs:
+        active_mark = " ✅ *(studying)*" if d["doc_id"] == active_id else ""
         suffix = f" — id {d['doc_id']}" if is_admin(message) else ""
-        lines.append(f"• {d['title']} (uploaded {d['upload_date']}){suffix}")
-        if d.get("file_id"):
-            markup.add(
-                types.InlineKeyboardButton(
-                    f"⬇ {d['title']}", callback_data=f"kbdl:{d['doc_id']}"
-                )
+        lines.append(f"• {d['title']} (uploaded {d['upload_date']}){suffix}{active_mark}")
+        row = [
+            types.InlineKeyboardButton(
+                f"📖 Study: {d['title']}", callback_data=f"kbuse:{d['doc_id']}"
             )
+        ]
+        if d.get("file_id"):
+            row.append(
+                types.InlineKeyboardButton("⬇", callback_data=f"kbdl:{d['doc_id']}")
+            )
+        markup.add(*row)
+    lines.append("")
+    lines.append("_Send /done to leave study mode and chat generally._")
     bot.send_message(
         message.chat.id, "\n".join(lines), reply_markup=markup, parse_mode="Markdown"
     )
+
+
+@bot.callback_query_handler(func=lambda c: (getattr(c, "data", "") or "").startswith("kbuse:"))
+def cb_use_document(call):
+    """Select a document to study — subsequent questions are answered from it."""
+    try:
+        doc_id = int(call.data.split(":", 1)[1])
+    except (ValueError, IndexError):
+        return
+    d = knowledge.get_document(doc_id)
+    if not d:
+        bot.answer_callback_query(call.id, "That document is no longer available.")
+        return
+    if not set_active_doc(call.from_user.id, doc_id):
+        bot.answer_callback_query(call.id, "Couldn't select it — storage is unavailable.")
+        return
+    bot.answer_callback_query(call.id, f"Studying {d['title']}")
+    bot.send_message(
+        call.message.chat.id,
+        f"📖 You're now studying *{d['title']}*.\n\n"
+        "Ask me anything about it — I'll answer only from this document and cite its "
+        "articles. Try:\n"
+        "• _\"What is the main idea of this document?\"_\n"
+        "• _\"Explain Article 5\"_\n\n"
+        "Send /done when you want to chat generally again.",
+        parse_mode="Markdown",
+    )
+
+
+@bot.message_handler(commands=["done"], func=is_allowed)
+def cmd_done(message):
+    """Leave study mode and return to general legal chat."""
+    active_id = get_active_doc(message.from_user.id)
+    if not active_id:
+        bot.send_message(
+            message.chat.id,
+            "You're already in general chat mode. Send /documents to pick a document to study.",
+        )
+        return
+    clear_active_doc(message.from_user.id)
+    bot.send_message(
+        message.chat.id,
+        "✅ Left study mode. We're back to general legal chat — ask me anything about "
+        "law and jurisprudence, or send /documents to study a specific document.",
+    )
+
+
+@bot.message_handler(commands=["current"], func=is_allowed)
+def cmd_current(message):
+    """Show which document (if any) the user is currently studying."""
+    active_id = get_active_doc(message.from_user.id)
+    d = knowledge.get_document(active_id) if active_id else None
+    if d:
+        bot.send_message(
+            message.chat.id,
+            f"📖 You're currently studying *{d['title']}* (uploaded {d['upload_date']}).\n"
+            "Send /done to switch back to general chat.",
+            parse_mode="Markdown",
+        )
+    else:
+        bot.send_message(
+            message.chat.id,
+            "💬 You're in general chat mode (no document selected). "
+            "Send /documents to pick one to study.",
+        )
 
 
 @bot.callback_query_handler(func=lambda c: (getattr(c, "data", "") or "").startswith("kbdl:"))

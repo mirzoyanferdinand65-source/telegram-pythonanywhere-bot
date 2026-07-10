@@ -122,6 +122,34 @@ def test_retrieve_pins_cited_article_first(kb, monkeypatch):
     assert "Article 300" in hits[0]["body"]
 
 
+def test_retrieve_scoped_to_single_document(kb, monkeypatch):
+    # Same keyword ("penalty") in two different documents. Scoping to one
+    # doc_id must never return chunks from the other.
+    monkeypatch.setattr(kb, "extract_pdf_text", lambda b: "Article 1. Penalty for theft under the criminal code.")
+    crim = kb.ingest(b"x", title="Criminal Code")["doc_id"]
+    monkeypatch.setattr(kb, "extract_pdf_text", lambda b: "Article 1. Penalty clauses of the civil code.")
+    civ = kb.ingest(b"x", title="Civil Code")["doc_id"]
+
+    hits = kb.retrieve("penalty", doc_id=crim)
+    assert hits and all(h["doc_id"] == crim for h in hits)
+    assert all(h["title"] == "Criminal Code" for h in hits)
+
+    civ_hits = kb.retrieve("penalty", doc_id=civ)
+    assert civ_hits and all(h["doc_id"] == civ for h in civ_hits)
+
+
+def test_overview_chunks_returns_document_opening_in_order(kb, monkeypatch):
+    body = "FIRST section preamble. " + ("middle body text. " * 200) + "LAST closing section."
+    monkeypatch.setattr(kb, "extract_pdf_text", lambda b: body)
+    doc_id = kb.ingest(b"x", title="Constitution")["doc_id"]
+
+    overview = kb.overview_chunks(doc_id, n=2)
+    assert overview
+    assert len(overview) <= 2
+    assert "FIRST" in overview[0]["body"]  # opens at the start of the document
+    assert all(o["doc_id"] == doc_id for o in overview)
+
+
 def test_retrieve_matches_cyrillic(kb, monkeypatch):
     monkeypatch.setattr(kb, "extract_pdf_text", lambda b: "Статья 42. Налог на прибыль 18 процентов.")
     kb.ingest(b"x", title="Civil Code")
