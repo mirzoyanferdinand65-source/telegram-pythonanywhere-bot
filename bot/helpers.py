@@ -58,6 +58,26 @@ def send_reply(message, text: str) -> None:
             bot.send_message(message.chat.id, chunk)
 
 
+def send_md(chat_id: int, text: str, reply_markup=None) -> None:
+    """Send a Markdown message, falling back to plain text if Telegram
+    rejects the entities.
+
+    Telegram's Markdown parser 400s the whole message on an unbalanced
+    ``*``/``_``/``[`` — which arbitrary content like a document title
+    (``Criminal_Code.pdf``) or an admin note routinely contains. Without a
+    fallback that 400 propagates out of the handler as a webhook 500, and
+    Telegram retries the same update forever, jamming the queue so the bot
+    goes silent. Mirror send_reply()'s retry so a bad title degrades to plain
+    text instead of taking the bot down. Use this for any direct send that
+    interpolates untrusted text with parse_mode="Markdown".
+    """
+    try:
+        bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode="Markdown")
+    except Exception as e:
+        print(f"Markdown send failed, retrying as plain text: {e}")
+        bot.send_message(chat_id, text, reply_markup=reply_markup)
+
+
 @contextmanager
 def keep_typing(chat_id: int):
     """Keep the Telegram "typing" indicator alive while the block runs.

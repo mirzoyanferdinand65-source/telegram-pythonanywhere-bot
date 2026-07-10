@@ -14,7 +14,7 @@ from bot.config import (
 from bot import knowledge
 from bot.active_doc import clear_active_doc, get_active_doc, set_active_doc
 from bot.ai import ask_ai
-from bot.helpers import is_admin, is_allowed, keep_typing, send_reply, should_respond
+from bot.helpers import is_admin, is_allowed, keep_typing, send_md, send_reply, should_respond
 from bot.history import clear_history
 from bot.notes import add_note, clear_notes, get_notes
 from bot.preferences import get_provider, set_provider
@@ -160,7 +160,7 @@ def cmd_help(message):
     ]
     if HF_SPACE_ID:
         lines.append("/model — Toggle the backend processing model")
-    bot.send_message(message.chat.id, "\n".join(lines), parse_mode="Markdown")
+    send_md(message.chat.id, "\n".join(lines))
 
 
 @bot.message_handler(commands=["reset"], func=is_allowed)
@@ -194,7 +194,7 @@ def cmd_about(message):
     ]
     if COMMIT_SHA:
         lines.append(f"Deployment SHA   : `{COMMIT_SHA}`")
-    bot.send_message(message.chat.id, "\n".join(lines), parse_mode="Markdown")
+    send_md(message.chat.id, "\n".join(lines))
 
 
 @bot.message_handler(commands=["sha"], func=is_allowed)
@@ -363,12 +363,11 @@ def handle_document(message):
         bot.send_message(message.chat.id, "⚠️ Failed to download or process that document.")
         return
     if result.get("ok"):
-        bot.send_message(
+        send_md(
             message.chat.id,
             f"✅ Indexed *{result['title']}* — {result['chunk_count']} searchable sections "
-            f"(uploaded {result['upload_date']}).\n\nMy answers will now cite it when relevant, "
-            "and users can download it via /documents.",
-            parse_mode="Markdown",
+            f"(uploaded {result['upload_date']}).\n\nUsers can now tap 📖 *Study* on it via "
+            "/documents to ask questions answered from this document, or ⬇ to download it.",
         )
         _log(message, "out", f"[ingested] {result['title']} ({result['chunk_count']} chunks)")
     else:
@@ -406,9 +405,7 @@ def cmd_documents(message):
         markup.add(*row)
     lines.append("")
     lines.append("_Send /done to leave study mode and chat generally._")
-    bot.send_message(
-        message.chat.id, "\n".join(lines), reply_markup=markup, parse_mode="Markdown"
-    )
+    send_md(message.chat.id, "\n".join(lines), reply_markup=markup)
 
 
 @bot.callback_query_handler(func=lambda c: (getattr(c, "data", "") or "").startswith("kbuse:"))
@@ -426,7 +423,7 @@ def cb_use_document(call):
         bot.answer_callback_query(call.id, "Couldn't select it — storage is unavailable.")
         return
     bot.answer_callback_query(call.id, f"Studying {d['title']}")
-    bot.send_message(
+    send_md(
         call.message.chat.id,
         f"📖 You're now studying *{d['title']}*.\n\n"
         "Ask me anything about it — I'll answer only from this document and cite its "
@@ -434,7 +431,6 @@ def cb_use_document(call):
         "• _\"What is the main idea of this document?\"_\n"
         "• _\"Explain Article 5\"_\n\n"
         "Send /done when you want to chat generally again.",
-        parse_mode="Markdown",
     )
 
 
@@ -462,11 +458,10 @@ def cmd_current(message):
     active_id = get_active_doc(message.from_user.id)
     d = knowledge.get_document(active_id) if active_id else None
     if d:
-        bot.send_message(
+        send_md(
             message.chat.id,
             f"📖 You're currently studying *{d['title']}* (uploaded {d['upload_date']}).\n"
             "Send /done to switch back to general chat.",
-            parse_mode="Markdown",
         )
     else:
         bot.send_message(
@@ -516,7 +511,7 @@ def cmd_deldoc(message):
     doc_id = int(parts[1].strip())
     d = knowledge.get_document(doc_id)
     if knowledge.delete_document(doc_id):
-        bot.send_message(message.chat.id, f"🗑️ Removed *{d['title']}* from the knowledge base.", parse_mode="Markdown")
+        send_md(message.chat.id, f"🗑️ Removed *{d['title']}* from the knowledge base.")
     else:
         bot.send_message(message.chat.id, f"No document with id {doc_id} was found.")
 

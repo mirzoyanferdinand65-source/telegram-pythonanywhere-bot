@@ -12,6 +12,35 @@ def make_message(chat_type="private", reply_from_id=None, text="hello"):
     return message
 
 
+# ── send_md ────────────────────────────────────────────────────────────────────
+
+
+def test_send_md_uses_markdown_and_passes_markup():
+    with patch("bot.helpers.bot") as mock_bot:
+        from bot.helpers import send_md
+
+        send_md(123, "*bold*", reply_markup="MARKUP")
+        mock_bot.send_message.assert_called_once_with(
+            123, "*bold*", reply_markup="MARKUP", parse_mode="Markdown"
+        )
+
+
+def test_send_md_falls_back_to_plain_text_on_markdown_failure():
+    """A document title with an unbalanced _ must not 500 the webhook —
+    send_md retries as plain text (this is the bug that jammed the queue)."""
+    with patch("bot.helpers.bot") as mock_bot:
+        mock_bot.send_message.side_effect = [Exception("can't parse entities"), None]
+        from bot.helpers import send_md
+
+        send_md(123, "• Criminal_Code.pdf (uploaded 01.01.25)", reply_markup="MK")
+        assert mock_bot.send_message.call_count == 2
+        assert mock_bot.send_message.call_args_list[0][1].get("parse_mode") == "Markdown"
+        # Retry drops parse_mode but keeps the markup.
+        retry_kwargs = mock_bot.send_message.call_args_list[1][1]
+        assert "parse_mode" not in retry_kwargs
+        assert retry_kwargs.get("reply_markup") == "MK"
+
+
 # ── send_reply ─────────────────────────────────────────────────────────────────
 
 

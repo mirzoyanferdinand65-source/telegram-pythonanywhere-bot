@@ -121,7 +121,7 @@ def test_handle_message_mention_only_skipped():
 def test_cmd_about_with_sqlite():
     """When SQLite is configured, /about should reference SQLite."""
     with (
-        patch("bot.handlers.bot") as mock_bot,
+        patch("bot.handlers.send_md") as mock_send,
         patch("bot.handlers.store", MagicMock()),
         patch("bot.handlers.HF_SPACE_ID", ""),
         patch("bot.handlers.generate", return_value="Hi! I'm your coach."),
@@ -129,7 +129,7 @@ def test_cmd_about_with_sqlite():
         from bot.handlers import cmd_about
 
         cmd_about(make_message())
-        sent = mock_bot.send_message.call_args[0][1]
+        sent = mock_send.call_args[0][1]
         assert "SQLite" in sent
         assert "stateless" not in sent
 
@@ -139,7 +139,7 @@ def test_cmd_about_includes_commit_sha_when_set():
     /about exposes a Version line so users can validate which commit is
     live."""
     with (
-        patch("bot.handlers.bot") as mock_bot,
+        patch("bot.handlers.send_md") as mock_send,
         patch("bot.handlers.store", MagicMock()),
         patch("bot.handlers.HF_SPACE_ID", ""),
         patch("bot.handlers.COMMIT_SHA", "abc1234"),
@@ -148,7 +148,7 @@ def test_cmd_about_includes_commit_sha_when_set():
         from bot.handlers import cmd_about
 
         cmd_about(make_message())
-        sent = mock_bot.send_message.call_args[0][1]
+        sent = mock_send.call_args[0][1]
         assert "Deployment SHA" in sent
         assert "abc1234" in sent
 
@@ -157,7 +157,7 @@ def test_cmd_about_omits_version_line_when_sha_unknown():
     """If git rev-parse failed at boot, the Version line is dropped
     entirely rather than showing 'unknown' — clearer for the user."""
     with (
-        patch("bot.handlers.bot") as mock_bot,
+        patch("bot.handlers.send_md") as mock_send,
         patch("bot.handlers.store", MagicMock()),
         patch("bot.handlers.HF_SPACE_ID", ""),
         patch("bot.handlers.COMMIT_SHA", ""),
@@ -166,7 +166,7 @@ def test_cmd_about_omits_version_line_when_sha_unknown():
         from bot.handlers import cmd_about
 
         cmd_about(make_message())
-        sent = mock_bot.send_message.call_args[0][1]
+        sent = mock_send.call_args[0][1]
         assert "Deployment SHA" not in sent
 
 
@@ -175,7 +175,7 @@ def test_cmd_about_without_store():
     guard for the NameError that occurred when `store` was missing from
     bot.handlers' imports."""
     with (
-        patch("bot.handlers.bot") as mock_bot,
+        patch("bot.handlers.send_md") as mock_send,
         patch("bot.handlers.store", None),
         patch("bot.handlers.HF_SPACE_ID", ""),
         patch("bot.handlers.generate", return_value="Hi! I'm your coach."),
@@ -183,7 +183,7 @@ def test_cmd_about_without_store():
         from bot.handlers import cmd_about
 
         cmd_about(make_message())
-        sent = mock_bot.send_message.call_args[0][1]
+        sent = mock_send.call_args[0][1]
         assert "Stateless" in sent
 
 
@@ -191,7 +191,7 @@ def test_cmd_about_intro_is_generated_live():
     """The persona intro is produced by a live generate() call (built from
     SYSTEM_PROMPT, not the user's saved history) and rendered into /about."""
     with (
-        patch("bot.handlers.bot") as mock_bot,
+        patch("bot.handlers.send_md") as mock_send,
         patch("bot.handlers.store", MagicMock()),
         patch("bot.handlers.HF_SPACE_ID", ""),
         patch(
@@ -207,7 +207,7 @@ def test_cmd_about_intro_is_generated_live():
         assert user_id == 123
         assert messages[0]["role"] == "system"
         assert messages[-1] == {"role": "user", "content": _ABOUT_PROMPT}
-        sent = mock_bot.send_message.call_args[0][1]
+        sent = mock_send.call_args[0][1]
         assert "I am a word-loving coach." in sent
 
 
@@ -215,7 +215,7 @@ def test_cmd_about_falls_back_when_generate_fails():
     """If the live AI call raises, /about still renders the static fallback
     intro and the technical block — it never breaks as a health probe."""
     with (
-        patch("bot.handlers.bot") as mock_bot,
+        patch("bot.handlers.send_md") as mock_send,
         patch("bot.handlers.store", MagicMock()),
         patch("bot.handlers.HF_SPACE_ID", ""),
         patch("bot.handlers.generate", side_effect=Exception("provider down")),
@@ -223,7 +223,7 @@ def test_cmd_about_falls_back_when_generate_fails():
         from bot.handlers import cmd_about, _ABOUT_FALLBACK
 
         cmd_about(make_message())
-        sent = mock_bot.send_message.call_args[0][1]
+        sent = mock_send.call_args[0][1]
         assert _ABOUT_FALLBACK in sent
         assert "SQLite" in sent
 
@@ -236,7 +236,7 @@ def test_cmd_help_blurb_is_generated_live():
     SYSTEM_PROMPT (not the user's history), and the static command list is
     still rendered below it."""
     with (
-        patch("bot.handlers.bot") as mock_bot,
+        patch("bot.handlers.send_md") as mock_send,
         patch("bot.handlers.HF_SPACE_ID", ""),
         patch(
             "bot.handlers.generate", return_value="I help you master English words."
@@ -251,7 +251,7 @@ def test_cmd_help_blurb_is_generated_live():
         assert user_id == 123
         assert messages[0]["role"] == "system"
         assert messages[-1] == {"role": "user", "content": _HELP_PROMPT}
-        sent = mock_bot.send_message.call_args[0][1]
+        sent = mock_send.call_args[0][1]
         assert "I help you master English words." in sent
         # Command list is code-rendered, not left to the model.
         assert "/reset" in sent
@@ -262,14 +262,14 @@ def test_cmd_help_falls_back_when_generate_fails():
     """If the live AI call raises, /help still shows the static fallback blurb
     and the command list."""
     with (
-        patch("bot.handlers.bot") as mock_bot,
+        patch("bot.handlers.send_md") as mock_send,
         patch("bot.handlers.HF_SPACE_ID", ""),
         patch("bot.handlers.generate", side_effect=Exception("provider down")),
     ):
         from bot.handlers import cmd_help, _HELP_FALLBACK
 
         cmd_help(make_message())
-        sent = mock_bot.send_message.call_args[0][1]
+        sent = mock_send.call_args[0][1]
         assert _HELP_FALLBACK in sent
         assert "/start" in sent
 
@@ -277,14 +277,14 @@ def test_cmd_help_falls_back_when_generate_fails():
 def test_cmd_help_includes_model_command_when_hf_set():
     """The /model line appears only when an HF space is configured."""
     with (
-        patch("bot.handlers.bot") as mock_bot,
+        patch("bot.handlers.send_md") as mock_send,
         patch("bot.handlers.HF_SPACE_ID", "owner/space"),
         patch("bot.handlers.generate", return_value="blurb"),
     ):
         from bot.handlers import cmd_help
 
         cmd_help(make_message())
-        sent = mock_bot.send_message.call_args[0][1]
+        sent = mock_send.call_args[0][1]
         assert "/model" in sent
 
 
@@ -459,6 +459,7 @@ def test_handle_document_ingests_for_admin():
         patch("bot.handlers.is_admin", return_value=True),
         patch("bot.handlers.keep_typing", return_value=_NullTyping()),
         patch("bot.handlers.knowledge") as mock_kb,
+        patch("bot.handlers.send_md") as mock_send,
         patch("bot.handlers.bot") as mock_bot,
     ):
         mock_kb.available.return_value = True
@@ -475,7 +476,7 @@ def test_handle_document_ingests_for_admin():
         handle_document(make_doc_message())
         mock_kb.ingest.assert_called_once()
         assert b"%PDF-data" == mock_kb.ingest.call_args[0][0]
-        assert "Indexed" in mock_bot.send_message.call_args[0][1]
+        assert "Indexed" in mock_send.call_args[0][1]
 
 
 def test_handle_document_rejects_non_pdf():
@@ -518,11 +519,40 @@ def test_cmd_documents_empty():
         assert "No documents" in mock_bot.send_message.call_args[0][1]
 
 
+def test_cmd_documents_title_with_markdown_char_does_not_raise():
+    """Regression: a document title with an unbalanced Markdown char (e.g. an
+    underscore) used to 400 → webhook 500 → jammed queue. Going through
+    send_md, the handler must not raise even when Markdown parsing fails."""
+    real_send_md_calls = []
+
+    def fake_send_md(chat_id, text, reply_markup=None):
+        # Simulate Telegram rejecting the Markdown, then succeeding on plain.
+        real_send_md_calls.append(text)
+
+    with (
+        patch("bot.handlers.is_admin", return_value=False),
+        patch("bot.handlers.knowledge") as mock_kb,
+        patch("bot.handlers.send_md", side_effect=fake_send_md),
+        patch("bot.handlers.get_active_doc", return_value=None),
+        patch("bot.handlers.bot"),
+        patch("bot.handlers.types"),
+    ):
+        mock_kb.list_documents.return_value = [
+            {"doc_id": 1, "title": "RA_Criminal_Code.pdf", "upload_date": "01.01.25", "file_id": "F1", "chunk_count": 5},
+        ]
+        from bot.handlers import cmd_documents
+
+        cmd_documents(make_message())  # must not raise
+        assert real_send_md_calls and "RA_Criminal_Code.pdf" in real_send_md_calls[0]
+
+
 def test_cmd_documents_lists_with_buttons():
     with (
         patch("bot.handlers.is_admin", return_value=False),
         patch("bot.handlers.knowledge") as mock_kb,
-        patch("bot.handlers.bot") as mock_bot,
+        patch("bot.handlers.send_md") as mock_send,
+        patch("bot.handlers.get_active_doc", return_value=None),
+        patch("bot.handlers.bot"),
         patch("bot.handlers.types") as mock_types,
     ):
         mock_kb.list_documents.return_value = [
@@ -533,9 +563,9 @@ def test_cmd_documents_lists_with_buttons():
         from bot.handlers import cmd_documents
 
         cmd_documents(make_message())
-        sent = mock_bot.send_message.call_args[0][1]
+        sent = mock_send.call_args[0][1]
         assert "RA Tax Code" in sent and "12.05.24" in sent
-        markup.add.assert_called_once()  # one download button
+        markup.add.assert_called_once()  # one row: Study + download buttons
 
 
 def test_cb_download_document_sends_file():
@@ -583,7 +613,8 @@ def test_cmd_deldoc_admin_deletes():
     with (
         patch("bot.handlers.is_admin", return_value=True),
         patch("bot.handlers.knowledge") as mock_kb,
-        patch("bot.handlers.bot") as mock_bot,
+        patch("bot.handlers.send_md") as mock_send,
+        patch("bot.handlers.bot"),
     ):
         mock_kb.get_document.return_value = {"doc_id": 3, "title": "Old Code", "upload_date": "01.01.24", "file_id": "F", "chunk_count": 1}
         mock_kb.delete_document.return_value = True
@@ -591,7 +622,7 @@ def test_cmd_deldoc_admin_deletes():
 
         cmd_deldoc(make_message(text="/deldoc 3"))
         mock_kb.delete_document.assert_called_once_with(3)
-        assert "Removed" in mock_bot.send_message.call_args[0][1]
+        assert "Removed" in mock_send.call_args[0][1]
 
 
 def test_cmd_deldoc_rejected_for_non_admin():
